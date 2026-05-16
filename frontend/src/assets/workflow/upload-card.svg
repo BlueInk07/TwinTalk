@@ -1,0 +1,25 @@
+<svg width="320" height="420" viewBox="0 0 320 420" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="uploadBg" x1="28" y1="24" x2="292" y2="388" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#141024"/>
+      <stop offset="0.55" stop-color="#10061C"/>
+      <stop offset="1" stop-color="#080410"/>
+    </linearGradient>
+    <linearGradient id="uploadGlow" x1="70" y1="74" x2="246" y2="286" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E9B4FF"/>
+      <stop offset="0.52" stop-color="#8E47FF"/>
+      <stop offset="1" stop-color="#4E1BC8"/>
+    </linearGradient>
+  </defs>
+  <rect x="18" y="18" width="284" height="384" rx="30" fill="url(#uploadBg)" stroke="rgba(219,168,255,0.28)"/>
+  <circle cx="92" cy="110" r="56" fill="#2B134A" fill-opacity="0.85"/>
+  <path d="M92 144V86M92 86L73 106M92 86L111 106" stroke="url(#uploadGlow)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="58" y="208" width="204" height="136" rx="26" fill="#19112A" stroke="#A566FF" stroke-opacity="0.42"/>
+  <rect x="86" y="232" width="64" height="88" rx="14" fill="#D9D9FF" fill-opacity="0.95"/>
+  <rect x="98" y="244" width="40" height="8" rx="4" fill="#8B69FF"/>
+  <rect x="98" y="262" width="40" height="8" rx="4" fill="#8B69FF" fill-opacity="0.8"/>
+  <circle cx="206" cy="256" r="22" fill="#5630D6" fill-opacity="0.9"/>
+  <path d="M198 256L204 262L216 248" stroke="#F7EDFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="234" cy="298" r="12" fill="#FF7BD5" fill-opacity="0.82"/>
+  <circle cx="232" cy="296" r="3" fill="#FCEEFF"/>
+</svg>

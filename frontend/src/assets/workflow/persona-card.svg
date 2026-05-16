@@ -1,0 +1,20 @@
+<svg width="320" height="420" viewBox="0 0 320 420" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="personaBg" x1="30" y1="16" x2="292" y2="398" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4B2651"/>
+      <stop offset="1" stop-color="#1A0A24"/>
+    </linearGradient>
+    <linearGradient id="personaBand" x1="92" y1="162" x2="228" y2="184" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF4FA6"/>
+      <stop offset="0.4" stop-color="#6AE0FF"/>
+      <stop offset="0.7" stop-color="#A24CFF"/>
+      <stop offset="1" stop-color="#FFD56A"/>
+    </linearGradient>
+  </defs>
+  <rect x="18" y="18" width="284" height="384" rx="30" fill="url(#personaBg)" stroke="rgba(219,168,255,0.28)"/>
+  <path d="M116 320C119 247 116 203 109 180C102 157 98 133 104 103C113 61 148 48 164 48C198 48 219 72 221 107C222 135 213 151 209 179C205 207 204 243 208 320H116Z" fill="#07050C"/>
+  <ellipse cx="165" cy="103" rx="54" ry="55" fill="#08060F"/>
+  <path d="M110 170H222V196C193 209 143 209 110 196V170Z" fill="url(#personaBand)"/>
+  <path d="M154 62C184 62 202 83 202 106C202 122 195 138 177 150C166 157 156 162 146 172C135 147 122 133 122 105C122 79 141 62 154 62Z" fill="#05040A"/>
+  <rect x="78" y="30" width="164" height="266" rx="22" transform="rotate(6 78 30)" stroke="#F4CBFF" stroke-opacity="0.32"/>
+</svg>

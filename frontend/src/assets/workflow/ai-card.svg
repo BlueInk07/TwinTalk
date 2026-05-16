@@ -1,0 +1,25 @@
+<svg width="320" height="420" viewBox="0 0 320 420" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="aiBg" x1="20" y1="16" x2="302" y2="404" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1B0E2B"/>
+      <stop offset="0.6" stop-color="#12091D"/>
+      <stop offset="1" stop-color="#0A0612"/>
+    </linearGradient>
+    <linearGradient id="trace" x1="64" y1="70" x2="255" y2="335" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7A4BFF"/>
+      <stop offset="1" stop-color="#1D123A"/>
+    </linearGradient>
+  </defs>
+  <rect x="18" y="18" width="284" height="384" rx="30" fill="url(#aiBg)" stroke="rgba(219,168,255,0.28)"/>
+  <rect x="106" y="146" width="108" height="108" rx="18" fill="#0C0916" stroke="#DFA8FF" stroke-opacity="0.5"/>
+  <rect x="136" y="176" width="48" height="48" rx="8" fill="#1A112D" stroke="#F0D0FF" stroke-opacity="0.65"/>
+  <path d="M160 64V146M160 254V338M64 160H106M214 160H256M64 240H106M214 240H256" stroke="url(#trace)" stroke-width="10" stroke-linecap="round"/>
+  <path d="M99 99L132 132M221 99L188 132M99 321L132 288M221 321L188 288" stroke="url(#trace)" stroke-width="10" stroke-linecap="round"/>
+  <path d="M82 64C112 84 130 85 160 85C190 85 208 84 238 64M82 356C112 336 130 335 160 335C190 335 208 336 238 356" stroke="#7D45FF" stroke-opacity="0.7" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="160" cy="160" r="8" fill="#D194FF"/>
+  <circle cx="160" cy="240" r="8" fill="#D194FF"/>
+  <circle cx="120" cy="120" r="7" fill="#A05EFF"/>
+  <circle cx="200" cy="120" r="7" fill="#A05EFF"/>
+  <circle cx="120" cy="280" r="7" fill="#A05EFF"/>
+  <circle cx="200" cy="280" r="7" fill="#A05EFF"/>
+</svg>
