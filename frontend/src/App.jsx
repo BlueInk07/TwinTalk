@@ -325,14 +325,14 @@ export default function App() {
   const [error, setError] = useState("");
 
   const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:8000";
+  const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
   /* ── Called by Google's SDK once the user picks an account ── */
   function handleCredentialResponse(response) {
     setGoogleLoading(true);
     setError("");
 
-    fetch(`${BACKEND_URL}/auth/google`, {
+    fetch(`${API_URL}/auth/google`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token: response.credential }),
