@@ -9,13 +9,25 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+FRONTEND_URLS = os.getenv("FRONTEND_URL", "")
+
+allowed_origins = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+
+allowed_origins.extend(
+    origin.strip().rstrip("/")
+    for origin in FRONTEND_URLS.split(",")
+    if origin.strip()
+)
 
 app = FastAPI()
 
-# Allow requests from your React dev server
+# Allow requests from local development and the deployed frontend.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -29,6 +41,9 @@ def home():
 
 @app.post("/auth/google")
 def google_login(body: dict):
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID is not configured")
+
     token = body.get("token")
 
     if not token:

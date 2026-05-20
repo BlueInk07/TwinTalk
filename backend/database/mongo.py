@@ -4,14 +4,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MONGO_URI ="mongodb+srv://simuchouhan17_db_user:HPFkjyZnbTUSYWiV@twintalk-ai.flwee6h.mongodb.net/?appName=Twintalk-AI"
+MONGO_URI = os.getenv("MONGO_URI")
+
+if not MONGO_URI:
+    raise RuntimeError("MONGO_URI environment variable is not set")
 
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     client.admin.command('ping')
-    print("✅ MongoDB connected:", client.list_database_names())
+    print("MongoDB connected")
 except Exception as e:
-    print("❌ MongoDB connection failed:", e)
+    print("MongoDB connection failed:", e)
     raise
 
 db = client["twintalk"]
