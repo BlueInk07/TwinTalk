@@ -325,7 +325,11 @@ export default function App() {
   const [error, setError] = useState("");
 
   const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-  const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+  const API_URL = import.meta.env.VITE_API_URL || (
+    import.meta.env.DEV
+      ? "http://127.0.0.1:8000"
+      : "https://twintalk-20in.onrender.com"
+  );
 
   /* ── Called by Google's SDK once the user picks an account ── */
   function handleCredentialResponse(response) {
