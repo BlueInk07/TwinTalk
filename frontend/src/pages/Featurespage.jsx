@@ -484,6 +484,45 @@ const styles = `
     font-size: 0.78rem;
   }
 
+  .tag.active {
+    border-color: rgba(244, 208, 255, 0.5);
+    background: rgba(217, 70, 239, 0.28);
+    color: #fff;
+  }
+
+  .difficulty-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  .difficulty-btn {
+    min-height: 38px;
+    border-radius: 999px;
+    border: 1px solid rgba(229, 197, 255, 0.16);
+    padding: 8px 13px;
+    color: #fff;
+    cursor: pointer;
+    background: rgba(255,255,255,0.055);
+  }
+
+  .difficulty-btn.easy.active { background: rgba(34, 197, 94, 0.34); }
+  .difficulty-btn.medium.active { background: rgba(234, 179, 8, 0.34); }
+  .difficulty-btn.hard.active { background: rgba(239, 68, 68, 0.34); }
+
+  .status-text {
+    margin-top: 12px;
+    color: rgba(232, 216, 255, 0.78);
+    font-family: 'Space Grotesk', sans-serif;
+    line-height: 1.55;
+    font-size: 0.9rem;
+  }
+
+  .error-text {
+    color: #f0abfc;
+  }
+
   .camera-stage {
     position: relative;
     min-height: 520px;
@@ -823,7 +862,17 @@ const steps = [
   },
 ];
 
-const extractedTopics = ["React", "System Design", "NLP", "OCR", "FastAPI", "MongoDB", "Data Structures", "Communication"];
+const API_URL = import.meta.env.VITE_API_URL || (
+  import.meta.env.DEV
+    ? "http://127.0.0.1:8000"
+    : "https://twintalk-20in.onrender.com"
+);
+
+const difficultyLabels = {
+  easy: "Easy",
+  medium: "Medium",
+  hard: "Hard",
+};
 
 function ParticleCanvas() {
   const canvasRef = useRef(null);
@@ -916,6 +965,21 @@ export default function FeaturesPage() {
   const [view, setView] = useState("home");
   const [uploadedFile, setUploadedFile] = useState(null);
   const [sourceText, setSourceText] = useState("");
+  const [uploadId, setUploadId] = useState("");
+  const [uploadPreview, setUploadPreview] = useState("");
+  const [questions, setQuestions] = useState({ easy: [], medium: [], hard: [] });
+  const [selectedDifficulty, setSelectedDifficulty] = useState("easy");
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [answerText, setAnswerText] = useState("");
+  const [interviewId, setInterviewId] = useState("");
+  const [evaluations, setEvaluations] = useState([]);
+  const [latestEvaluation, setLatestEvaluation] = useState(null);
+  const [generatedReport, setGeneratedReport] = useState(null);
+  const [workflowMessage, setWorkflowMessage] = useState("");
+  const [workflowError, setWorkflowError] = useState("");
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [isReporting, setIsReporting] = useState(false);
   const [sessionActive, setSessionActive] = useState(false);
   const [sessionDone, setSessionDone] = useState(false);
   const [violations, setViolations] = useState(0);
@@ -935,9 +999,22 @@ export default function FeaturesPage() {
   }, []);
 
   const selectedReport = reports[0];
+  const activeQuestions = questions[selectedDifficulty] || [];
+  const activeQuestion = activeQuestions[currentQuestionIndex] || "";
   const averageScore = Math.round(
     Object.values(selectedReport.scores).reduce((sum, value) => sum + value, 0) /
       Object.values(selectedReport.scores).length
+  );
+  const liveScores = generatedReport
+    ? {
+        Knowledge: Math.round((generatedReport.technical_accuracy || 0) * 10),
+        Clarity: Math.round((generatedReport.communication || 0) * 10),
+        Confidence: Math.round((generatedReport.confidence_score || 0) * 10),
+        Fluency: generatedReport.hesitation === "High" ? 48 : generatedReport.hesitation === "Medium" ? 68 : 84,
+      }
+    : selectedReport.scores;
+  const liveAverageScore = Math.round(
+    Object.values(liveScores).reduce((sum, value) => sum + value, 0) / Object.values(liveScores).length
   );
 
   useEffect(() => {
@@ -967,12 +1044,104 @@ export default function FeaturesPage() {
     }
   }, [cameraReady]);
 
+  useEffect(() => {
+    if (!sessionActive || !activeQuestion || !("speechSynthesis" in window)) return;
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(activeQuestion);
+    utterance.rate = 0.92;
+    utterance.pitch = 1;
+    window.speechSynthesis.speak(utterance);
+
+    return () => window.speechSynthesis.cancel();
+  }, [activeQuestion, sessionActive]);
+
+  const handleFileChange = (event) => {
+    const file = event.target.files?.[0] || null;
+    setUploadedFile(file);
+    setUploadId("");
+    setUploadPreview("");
+    setQuestions({ easy: [], medium: [], hard: [] });
+    setWorkflowError("");
+    setWorkflowMessage(file ? "File selected. Start the interview to upload and generate questions." : "");
+  };
+
+  const prepareQuestions = async () => {
+    setWorkflowError("");
+    setWorkflowMessage("");
+
+    if (!uploadedFile && !sourceText.trim()) {
+      throw new Error("Upload a PDF/DOCX/TXT file or paste notes before starting.");
+    }
+
+    let nextUploadId = uploadId;
+
+    if (uploadedFile && !nextUploadId) {
+      setWorkflowMessage("Uploading document and extracting text...");
+      const formData = new FormData();
+      formData.append("file", uploadedFile);
+      if (currentUser.email) formData.append("user_email", currentUser.email);
+
+      const uploadResponse = await fetch(`${API_URL}/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      const uploadData = await uploadResponse.json();
+
+      if (!uploadResponse.ok) {
+        throw new Error(uploadData.detail || "Upload failed.");
+      }
+
+      nextUploadId = uploadData.upload_id;
+      setUploadId(nextUploadId);
+      setUploadPreview(uploadData.preview || "");
+    }
+
+    const hasQuestions = Object.values(questions).some((items) => items.length);
+    if (!hasQuestions) {
+      setWorkflowMessage("Generating interview questions with AI...");
+      const response = await fetch(`${API_URL}/interview/questions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          upload_id: nextUploadId || null,
+          text: nextUploadId ? null : sourceText,
+          user_email: currentUser.email || null,
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Question generation failed.");
+      }
+
+      setQuestions(data.questions || { easy: [], medium: [], hard: [] });
+      setCurrentQuestionIndex(0);
+    }
+
+    setWorkflowMessage("Questions ready. Starting interview...");
+  };
+
   const startInterview = async () => {
+    setIsPreparing(true);
+    setWorkflowError("");
+
+    try {
+      await prepareQuestions();
+    } catch (error) {
+      setWorkflowError(error.message || "Could not prepare the interview.");
+      setIsPreparing(false);
+      return;
+    }
+
     setView("interview");
     setSessionDone(false);
     setSessionActive(true);
     setCameraReady(false);
     setCameraError("");
+    setAnswerText("");
+    setLatestEvaluation(null);
+    setIsPreparing(false);
 
     try {
       if (cameraRef.current?.requestFullscreen) {
@@ -991,7 +1160,60 @@ export default function FeaturesPage() {
     }
   };
 
+  const submitAnswer = async () => {
+    if (!activeQuestion || !answerText.trim()) {
+      setWorkflowError("Type an answer before submitting.");
+      return;
+    }
+
+    setIsEvaluating(true);
+    setWorkflowError("");
+
+    try {
+      const startedAt = Date.now();
+      const response = await fetch(`${API_URL}/interview/evaluate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          interview_id: interviewId || null,
+          user_email: currentUser.email || null,
+          question: activeQuestion,
+          answer: answerText,
+          duration_seconds: Math.max(20, Math.round((Date.now() - startedAt) / 1000)),
+          pauses: [],
+          visual_metrics: {
+            eye_contact_percentage: cameraReady ? 70 : 0,
+            face_visibility_percentage: cameraReady ? 85 : 0,
+            smile_consistency_percentage: cameraReady ? 45 : 0,
+            head_movement_frequency: cameraReady ? 3 : 0,
+          },
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || "Answer evaluation failed.");
+      }
+
+      setInterviewId(data.interview_id);
+      setLatestEvaluation(data.evaluation);
+      setEvaluations((items) => [...items, data]);
+      setAnswerText("");
+
+      if (currentQuestionIndex < activeQuestions.length - 1) {
+        setCurrentQuestionIndex((index) => index + 1);
+      }
+    } catch (error) {
+      setWorkflowError(error.message || "Could not evaluate the answer.");
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
   const endInterview = async () => {
+    setIsReporting(true);
+    setWorkflowError("");
+
     setSessionActive(false);
     setSessionDone(true);
 
@@ -1005,6 +1227,29 @@ export default function FeaturesPage() {
       await document.exitFullscreen().catch(() => {});
     }
 
+    if (interviewId) {
+      try {
+        const response = await fetch(`${API_URL}/analysis/report`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            interview_id: interviewId,
+            user_email: currentUser.email || null,
+          }),
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.detail || "Report generation failed.");
+        }
+
+        setGeneratedReport(data.report);
+      } catch (error) {
+        setWorkflowError(error.message || "Could not generate final report.");
+      }
+    }
+
+    setIsReporting(false);
     setView("results");
   };
 
@@ -1124,12 +1369,12 @@ export default function FeaturesPage() {
                   <span className="eyebrow"><span className="signal-dot" />New Session</span>
                   <h1 className="section-title">Upload, analyze, interview</h1>
                   <p className="section-copy">
-                    This frontend is ready for backend wiring: file ingestion, OCR, repository parsing, speech analysis,
-                    and adaptive question generation can plug into this flow.
+                    Upload a PDF, DOCX, or TXT file, or paste notes. TwinTalk will extract the content,
+                    generate interview questions, and evaluate your answers through the backend.
                   </p>
                 </div>
-                <button type="button" className="primary-btn" onClick={startInterview}>
-                  <Icon name="camera" /> Start Interview
+                <button type="button" className="primary-btn" onClick={startInterview} disabled={isPreparing}>
+                  <Icon name="camera" /> {isPreparing ? "Preparing..." : "Start Interview"}
                 </button>
               </div>
 
@@ -1144,8 +1389,8 @@ export default function FeaturesPage() {
                     <div style={{ marginTop: 20 }}>
                       <input
                         type="file"
-                        accept=".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.txt,.md"
-                        onChange={(event) => setUploadedFile(event.target.files?.[0] || null)}
+                        accept=".pdf,.docx,.png,.jpg,.jpeg,.webp,.txt"
+                        onChange={handleFileChange}
                       />
                     </div>
                     <textarea
@@ -1154,6 +1399,8 @@ export default function FeaturesPage() {
                       onChange={(event) => setSourceText(event.target.value)}
                       placeholder="Paste notes, GitHub repository summary, project explanation, or a topic you want assessed..."
                     />
+                    {workflowMessage && <p className="status-text">{workflowMessage}</p>}
+                    {workflowError && <p className="status-text error-text">{workflowError}</p>}
                   </div>
                 </div>
 
@@ -1163,15 +1410,44 @@ export default function FeaturesPage() {
                     {uploadedFile ? uploadedFile.name : sourceText ? "Text source detected" : "Waiting for input"}
                   </h2>
                   <p className="panel-copy">
-                    Extracted concepts, probable difficulty, and interview coverage appear here before the camera session starts.
+                    {uploadPreview
+                      ? uploadPreview
+                      : "Generated questions appear here after the backend reads your uploaded file or pasted text."}
                   </p>
-                  <div className="analysis-tags">
-                    {extractedTopics.map((topic) => <span className="tag" key={topic}>{topic}</span>)}
+                  <div className="difficulty-row">
+                    {Object.entries(difficultyLabels).map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className={`difficulty-btn ${key} ${selectedDifficulty === key ? "active" : ""}`}
+                        onClick={() => {
+                          setSelectedDifficulty(key);
+                          setCurrentQuestionIndex(0);
+                        }}
+                      >
+                        {label} ({questions[key]?.length || 0})
+                      </button>
+                    ))}
                   </div>
                   <div className="insight-list">
-                    <div className="insight-item">Difficulty estimate: intermediate to advanced based on project and concept density.</div>
-                    <div className="insight-item">First probe: explain one concept from first principles, then solve a practical follow-up.</div>
-                    <div className="insight-item">Weak-zone detection: shallow definitions, vague tradeoffs, and low-confidence delivery.</div>
+                    {activeQuestions.length ? (
+                      activeQuestions.map((question, index) => (
+                        <button
+                          type="button"
+                          className={`insight-item ${index === currentQuestionIndex ? "tag active" : ""}`}
+                          key={question}
+                          onClick={() => setCurrentQuestionIndex(index)}
+                          style={{ textAlign: "left", cursor: "pointer" }}
+                        >
+                          {index + 1}. {question}
+                        </button>
+                      ))
+                    ) : (
+                      <>
+                        <div className="insight-item">Upload a file or paste notes, then click Start Interview.</div>
+                        <div className="insight-item">PDF, DOCX, and TXT are the best formats for the first test.</div>
+                      </>
+                    )}
                   </div>
                 </aside>
               </div>
@@ -1197,8 +1473,8 @@ export default function FeaturesPage() {
                     >
                       <Icon name="expand" /> Fullscreen
                     </button>
-                    <button type="button" className="primary-btn" onClick={endInterview}>
-                      Generate Report
+                    <button type="button" className="primary-btn" onClick={endInterview} disabled={isReporting}>
+                      {isReporting ? "Generating..." : "Generate Report"}
                     </button>
                   </div>
                 </div>
@@ -1218,12 +1494,35 @@ export default function FeaturesPage() {
 
                 <div className="camera-bottom">
                   <div className="question-card">
-                    <small>Question 2 of 7 · Generated from uploaded source</small>
-                    <h3>Explain how OCR and NLP would work together to evaluate a coding screenshot, then name one failure case.</h3>
+                    <small>
+                      Question {Math.min(currentQuestionIndex + 1, activeQuestions.length || 1)} of {activeQuestions.length || 1}
+                      {" "}· {difficultyLabels[selectedDifficulty]} · Generated from uploaded source
+                    </small>
+                    <h3>{activeQuestion || "No generated question found. Go back and generate questions first."}</h3>
+                    {latestEvaluation?.summary && (
+                      <p className="panel-copy">Last feedback: {latestEvaluation.summary}</p>
+                    )}
                     {cameraError && <p className="panel-copy" style={{ color: "#f0abfc" }}>{cameraError}</p>}
+                    {workflowError && <p className="panel-copy" style={{ color: "#f0abfc" }}>{workflowError}</p>}
                     <p className="panel-copy">Rule violations recorded: {violations}</p>
                   </div>
-                  <textarea className="answer-box" placeholder="Type answer or use voice input..." />
+                  <div>
+                    <textarea
+                      className="answer-box"
+                      value={answerText}
+                      onChange={(event) => setAnswerText(event.target.value)}
+                      placeholder="Type your answer here..."
+                    />
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      onClick={submitAnswer}
+                      disabled={isEvaluating || !activeQuestion}
+                      style={{ width: "100%", marginTop: 10 }}
+                    >
+                      {isEvaluating ? "Evaluating..." : "Submit Answer"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </section>
@@ -1273,29 +1572,39 @@ export default function FeaturesPage() {
               <div className="metrics-grid">
                 <div className="metric-card">
                   <div className="metric-label">Overall readiness</div>
-                  <div className="metric-value">{averageScore}%</div>
+                  <div className="metric-value">{liveAverageScore}%</div>
                 </div>
                 <div className="metric-card">
                   <div className="metric-label">Rule violations</div>
                   <div className="metric-value">{violations}</div>
                 </div>
                 <div className="metric-card">
-                  <div className="metric-label">Weak areas found</div>
-                  <div className="metric-value">3</div>
+                  <div className="metric-label">Answers evaluated</div>
+                  <div className="metric-value">{evaluations.length}</div>
                 </div>
               </div>
 
               <div className="workflow-layout" style={{ marginTop: 18 }}>
                 <article className="panel">
                   <h2 className="section-title" style={{ fontSize: "1.55rem" }}>Assessment scales</h2>
-                  <ScoreLines scores={selectedReport.scores} />
+                  <ScoreLines scores={liveScores} />
                 </article>
                 <article className="panel">
                   <h2 className="section-title" style={{ fontSize: "1.55rem" }}>Personalized recommendations</h2>
                   <div className="insight-list">
-                    <div className="insight-item">Revise conceptual depth for OCR edge cases and explain tradeoffs with examples.</div>
-                    <div className="insight-item">Practice concise answer structure: claim, reasoning, example, limitation.</div>
-                    <div className="insight-item">Run one follow-up round on system design and one on implementation debugging.</div>
+                    {generatedReport ? (
+                      <>
+                        <div className="insight-item">{generatedReport.summary}</div>
+                        {(generatedReport.improvement_plan || []).map((item) => (
+                          <div className="insight-item" key={item}>{item}</div>
+                        ))}
+                      </>
+                    ) : (
+                      <>
+                        <div className="insight-item">Submit at least one answer before generating a report.</div>
+                        {workflowError && <div className="insight-item">{workflowError}</div>}
+                      </>
+                    )}
                   </div>
                 </article>
               </div>
