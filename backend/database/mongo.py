@@ -1,8 +1,10 @@
 import os
+from pathlib import Path
+
 from pymongo import MongoClient
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 MONGO_URI = os.getenv("MONGO_URI")
 
@@ -20,3 +22,7 @@ except Exception as e:
 db = client["twintalk"]
 users_collection = db["users"]
 chats_collection = db["chats"]
+uploads_collection = db["uploads"]
+questions_collection = db["questions"]
+interviews_collection = db["interviews"]
+reports_collection = db["reports"]

@@ -1,12 +1,17 @@
 import os
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from api.analysis import router as analysis_router
+from api.interview import router as interview_router
+from api.upload import router as upload_router
 from database.mongo import users_collection
 from google.oauth2 import id_token
 from google.auth.transport import requests
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 FRONTEND_URLS = os.getenv("FRONTEND_URL", "")
@@ -32,6 +37,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(upload_router)
+app.include_router(interview_router)
+app.include_router(analysis_router)
 
 
 @app.get("/")
