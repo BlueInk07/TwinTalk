@@ -19,6 +19,9 @@ You are a strict but helpful mock-interview evaluator. Return only valid JSON.
 Scores must be numbers from 0 to 10.
 """
 
+GEMINI_DEFAULT_MODEL = "gemini-2.0-flash"
+GEMINI_FALLBACK_MODELS = ("gemini-2.0-flash", "gemini-1.5-flash-001")
+
 
 def generate_questions_from_text(text: str) -> dict[str, list[str]]:
     prompt = f"""
@@ -124,9 +127,20 @@ def _complete_json(system_prompt: str, user_prompt: str) -> str:
         import google.generativeai as genai
 
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        model = genai.GenerativeModel(os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))
-        response = model.generate_content(f"{system_prompt}\n\n{user_prompt}")
-        return response.text or "{}"
+        preferred_model = os.getenv("GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
+        model_names = [preferred_model]
+        model_names.extend(name for name in GEMINI_FALLBACK_MODELS if name != preferred_model)
+
+        last_error = None
+        for model_name in model_names:
+            try:
+                model = genai.GenerativeModel(model_name)
+                response = model.generate_content(f"{system_prompt}\n\n{user_prompt}")
+                return response.text or "{}"
+            except Exception as exc:
+                last_error = exc
+
+        raise RuntimeError(f"Gemini generation failed: {last_error}")
 
     raise RuntimeError("Set OPENAI_API_KEY or GEMINI_API_KEY to use AI endpoints.")
 
