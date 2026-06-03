@@ -19,8 +19,13 @@ You are a strict but helpful mock-interview evaluator. Return only valid JSON.
 Scores must be numbers from 0 to 10.
 """
 
-GEMINI_DEFAULT_MODEL = "gemini-2.0-flash"
-GEMINI_FALLBACK_MODELS = ("gemini-2.0-flash", "gemini-1.5-flash-001")
+GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"
+GEMINI_FALLBACK_MODELS = (
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+)
 
 
 def generate_questions_from_text(text: str) -> dict[str, list[str]]:
@@ -127,9 +132,7 @@ def _complete_json(system_prompt: str, user_prompt: str) -> str:
         import google.generativeai as genai
 
         genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        preferred_model = os.getenv("GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
-        model_names = [preferred_model]
-        model_names.extend(name for name in GEMINI_FALLBACK_MODELS if name != preferred_model)
+        model_names = _gemini_model_candidates(genai)
 
         last_error = None
         for model_name in model_names:
@@ -143,6 +146,37 @@ def _complete_json(system_prompt: str, user_prompt: str) -> str:
         raise RuntimeError(f"Gemini generation failed: {last_error}")
 
     raise RuntimeError("Set OPENAI_API_KEY or GEMINI_API_KEY to use AI endpoints.")
+
+
+def _gemini_model_candidates(genai: Any) -> list[str]:
+    preferred_model = os.getenv("GEMINI_MODEL", GEMINI_DEFAULT_MODEL)
+    candidates = [preferred_model]
+    candidates.extend(name for name in GEMINI_FALLBACK_MODELS if name != preferred_model)
+
+    try:
+        listed_models = []
+        for model in genai.list_models():
+            if "generateContent" not in getattr(model, "supported_generation_methods", []):
+                continue
+
+            model_name = getattr(model, "name", "")
+            if model_name.startswith("models/"):
+                model_name = model_name.removeprefix("models/")
+
+            if model_name:
+                listed_models.append(model_name)
+
+        preferred_listed = [
+            name
+            for name in listed_models
+            if name.startswith(("gemini-2.5", "gemini-2.0", "gemini-3"))
+        ]
+        candidates.extend(name for name in preferred_listed if name not in candidates)
+        candidates.extend(name for name in listed_models if name not in candidates)
+    except Exception:
+        pass
+
+    return candidates
 
 
 def _parse_json(content: str) -> dict[str, Any]:
