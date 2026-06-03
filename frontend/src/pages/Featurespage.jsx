@@ -874,6 +874,13 @@ const difficultyLabels = {
   hard: "Hard",
 };
 
+const formatNetworkError = (error) => {
+  if (error?.message === "Failed to fetch") {
+    return `Could not reach backend at ${API_URL}. Check Render is live and CORS allows this Vercel URL.`;
+  }
+  return error?.message || "Something went wrong.";
+};
+
 function ParticleCanvas() {
   const canvasRef = useRef(null);
   const rafRef = useRef(null);
@@ -1129,7 +1136,7 @@ export default function FeaturesPage() {
     try {
       await prepareQuestions();
     } catch (error) {
-      setWorkflowError(error.message || "Could not prepare the interview.");
+      setWorkflowError(formatNetworkError(error));
       setIsPreparing(false);
       return;
     }
@@ -1204,7 +1211,7 @@ export default function FeaturesPage() {
         setCurrentQuestionIndex((index) => index + 1);
       }
     } catch (error) {
-      setWorkflowError(error.message || "Could not evaluate the answer.");
+      setWorkflowError(formatNetworkError(error));
     } finally {
       setIsEvaluating(false);
     }
@@ -1245,7 +1252,7 @@ export default function FeaturesPage() {
 
         setGeneratedReport(data.report);
       } catch (error) {
-        setWorkflowError(error.message || "Could not generate final report.");
+        setWorkflowError(formatNetworkError(error));
       }
     }
 
