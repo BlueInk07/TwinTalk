@@ -523,6 +523,99 @@ const styles = `
     color: #f0abfc;
   }
 
+  .config-row {
+    display: grid;
+    gap: 10px;
+    margin-top: 16px;
+    text-align: left;
+  }
+
+  .config-label {
+    display: grid;
+    gap: 7px;
+    color: rgba(236, 218, 255, 0.78);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 0.86rem;
+  }
+
+  .select-input {
+    min-height: 42px;
+    border: 1px solid rgba(218, 176, 255, 0.16);
+    border-radius: 12px;
+    padding: 9px 12px;
+    color: #f8f1ff;
+    background: rgba(255,255,255,0.055);
+    outline: none;
+  }
+
+  .completion-panel {
+    margin-top: 12px;
+    padding: 14px;
+    border-radius: 16px;
+    border: 1px solid rgba(74, 222, 128, 0.32);
+    background: rgba(34, 197, 94, 0.12);
+    color: rgba(235, 255, 241, 0.9);
+    font-family: 'Space Grotesk', sans-serif;
+    line-height: 1.55;
+  }
+
+  .voice-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+
+  .report-document {
+    display: grid;
+    gap: 22px;
+    border-radius: 20px;
+    padding: 28px;
+    border: 1px solid rgba(218, 176, 255, 0.16);
+    background: rgba(255,255,255,0.045);
+    box-shadow: 0 24px 70px rgba(0,0,0,0.22);
+  }
+
+  .report-section {
+    display: grid;
+    gap: 10px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid rgba(218, 176, 255, 0.12);
+  }
+
+  .report-section:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .report-section h2 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.1rem;
+  }
+
+  .report-section p,
+  .report-section li {
+    color: rgba(238, 222, 255, 0.78);
+    font-family: 'Space Grotesk', sans-serif;
+    line-height: 1.65;
+  }
+
+  .report-kv {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 18px;
+  }
+
+  .report-kv div {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(218, 176, 255, 0.08);
+    color: rgba(238, 222, 255, 0.78);
+    font-family: 'Space Grotesk', sans-serif;
+  }
+
   .camera-stage {
     position: relative;
     min-height: 520px;
@@ -733,7 +826,8 @@ const styles = `
 
     .steps-grid,
     .reports-grid,
-    .metrics-grid {
+    .metrics-grid,
+    .report-kv {
       grid-template-columns: 1fr;
     }
 
@@ -874,6 +968,8 @@ const difficultyLabels = {
   hard: "Hard",
 };
 
+const questionCountOptions = [3, 5, 10, 15];
+
 const formatNetworkError = (error) => {
   if (error?.message === "Failed to fetch") {
     return `Could not reach backend at ${API_URL}. Check Render is live and CORS allows this Vercel URL.`;
@@ -976,12 +1072,17 @@ export default function FeaturesPage() {
   const [uploadPreview, setUploadPreview] = useState("");
   const [questions, setQuestions] = useState({ easy: [], medium: [], hard: [] });
   const [selectedDifficulty, setSelectedDifficulty] = useState("easy");
+  const [questionLimit, setQuestionLimit] = useState(5);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answerText, setAnswerText] = useState("");
+  const [interimTranscript, setInterimTranscript] = useState("");
   const [interviewId, setInterviewId] = useState("");
   const [evaluations, setEvaluations] = useState([]);
   const [latestEvaluation, setLatestEvaluation] = useState(null);
   const [generatedReport, setGeneratedReport] = useState(null);
+  const [interviewComplete, setInterviewComplete] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [questionStartedAt, setQuestionStartedAt] = useState(Date.now());
   const [workflowMessage, setWorkflowMessage] = useState("");
   const [workflowError, setWorkflowError] = useState("");
   const [isPreparing, setIsPreparing] = useState(false);
@@ -996,6 +1097,7 @@ export default function FeaturesPage() {
   const cameraRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const recognitionRef = useRef(null);
 
   const currentUser = useMemo(() => {
     try {
@@ -1007,7 +1109,24 @@ export default function FeaturesPage() {
 
   const selectedReport = reports[0];
   const activeQuestions = questions[selectedDifficulty] || [];
-  const activeQuestion = activeQuestions[currentQuestionIndex] || "";
+  const questionQueue = useMemo(() => {
+    const primary = (questions[selectedDifficulty] || []).map((question) => ({
+      difficulty: selectedDifficulty,
+      question,
+    }));
+    const mixed = ["easy", "medium", "hard"].flatMap((difficulty) =>
+      (questions[difficulty] || []).map((question) => ({ difficulty, question }))
+    );
+    const pool = questionLimit <= primary.length ? primary : mixed;
+    return pool.slice(0, questionLimit);
+  }, [questions, questionLimit, selectedDifficulty]);
+  const activeQuestionItem = questionQueue[currentQuestionIndex];
+  const activeQuestion = activeQuestionItem?.question || "";
+  const activeDifficulty = activeQuestionItem?.difficulty || selectedDifficulty;
+  const answeredCount = evaluations.length;
+  const speechSupported = typeof window !== "undefined" && (
+    "SpeechRecognition" in window || "webkitSpeechRecognition" in window
+  );
   const averageScore = Math.round(
     Object.values(selectedReport.scores).reduce((sum, value) => sum + value, 0) /
       Object.values(selectedReport.scores).length
@@ -1063,12 +1182,26 @@ export default function FeaturesPage() {
     return () => window.speechSynthesis.cancel();
   }, [activeQuestion, sessionActive]);
 
+  useEffect(() => {
+    setQuestionStartedAt(Date.now());
+  }, [activeQuestion]);
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop?.();
+    };
+  }, []);
+
   const handleFileChange = (event) => {
     const file = event.target.files?.[0] || null;
     setUploadedFile(file);
     setUploadId("");
     setUploadPreview("");
     setQuestions({ easy: [], medium: [], hard: [] });
+    setEvaluations([]);
+    setGeneratedReport(null);
+    setInterviewId("");
+    setInterviewComplete(false);
     setWorkflowError("");
     setWorkflowMessage(file ? "File selected. Start the interview to upload and generate questions." : "");
   };
@@ -1144,6 +1277,10 @@ export default function FeaturesPage() {
     setView("interview");
     setSessionDone(false);
     setSessionActive(true);
+    setInterviewComplete(false);
+    setEvaluations([]);
+    setGeneratedReport(null);
+    setInterviewId("");
     setCameraReady(false);
     setCameraError("");
     setAnswerText("");
@@ -1167,6 +1304,56 @@ export default function FeaturesPage() {
     }
   };
 
+  const startVoiceInput = () => {
+    if (!speechSupported || isListening) return;
+
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    recognition.onresult = (event) => {
+      let finalText = "";
+      let interimText = "";
+
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const transcript = event.results[index][0].transcript;
+        if (event.results[index].isFinal) {
+          finalText += transcript;
+        } else {
+          interimText += transcript;
+        }
+      }
+
+      if (finalText.trim()) {
+        setAnswerText((current) => `${current}${current ? " " : ""}${finalText.trim()}`);
+      }
+      setInterimTranscript(interimText.trim());
+    };
+
+    recognition.onerror = (event) => {
+      setWorkflowError(`Voice input error: ${event.error}`);
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      setInterimTranscript("");
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setWorkflowError("");
+    setIsListening(true);
+  };
+
+  const stopVoiceInput = () => {
+    recognitionRef.current?.stop?.();
+    setIsListening(false);
+    setInterimTranscript("");
+  };
+
   const submitAnswer = async () => {
     if (!activeQuestion || !answerText.trim()) {
       setWorkflowError("Type an answer before submitting.");
@@ -1175,9 +1362,9 @@ export default function FeaturesPage() {
 
     setIsEvaluating(true);
     setWorkflowError("");
+    stopVoiceInput();
 
     try {
-      const startedAt = Date.now();
       const response = await fetch(`${API_URL}/interview/evaluate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1186,7 +1373,7 @@ export default function FeaturesPage() {
           user_email: currentUser.email || null,
           question: activeQuestion,
           answer: answerText,
-          duration_seconds: Math.max(20, Math.round((Date.now() - startedAt) / 1000)),
+          duration_seconds: Math.max(20, Math.round((Date.now() - questionStartedAt) / 1000)),
           pauses: [],
           visual_metrics: {
             eye_contact_percentage: cameraReady ? 70 : 0,
@@ -1207,8 +1394,12 @@ export default function FeaturesPage() {
       setEvaluations((items) => [...items, data]);
       setAnswerText("");
 
-      if (currentQuestionIndex < activeQuestions.length - 1) {
+      if (currentQuestionIndex < questionQueue.length - 1) {
         setCurrentQuestionIndex((index) => index + 1);
+      } else {
+        setInterviewComplete(true);
+        setSessionActive(false);
+        setWorkflowMessage("Interview complete. Generate your final report when you are ready.");
       }
     } catch (error) {
       setWorkflowError(formatNetworkError(error));
@@ -1220,6 +1411,7 @@ export default function FeaturesPage() {
   const endInterview = async () => {
     setIsReporting(true);
     setWorkflowError("");
+    stopVoiceInput();
 
     setSessionActive(false);
     setSessionDone(true);
@@ -1258,6 +1450,43 @@ export default function FeaturesPage() {
 
     setIsReporting(false);
     setView("results");
+  };
+
+  const downloadReport = () => {
+    const report = generatedReport;
+    const lines = [
+      "TwinTalk AI Interview Report",
+      `Candidate: ${currentUser.name || currentUser.email || "Current user"}`,
+      `Source: ${uploadedFile?.name || "Pasted text"}`,
+      `Questions answered: ${evaluations.length}`,
+      "",
+      "Summary",
+      report?.summary || "No generated summary available.",
+      "",
+      "Scores",
+      `Overall score: ${report?.overall_score ?? liveAverageScore}/10`,
+      `Confidence: ${report?.confidence_score ?? "N/A"}/10`,
+      `Technical accuracy: ${report?.technical_accuracy ?? "N/A"}/10`,
+      `Communication: ${report?.communication ?? "N/A"}/10`,
+      `Hesitation: ${report?.hesitation || "N/A"}`,
+      `Eye contact: ${report?.eye_contact || "N/A"}`,
+      "",
+      "Strengths",
+      ...((report?.strengths || []).map((item) => `- ${item}`)),
+      "",
+      "Weaknesses",
+      ...((report?.weaknesses || []).map((item) => `- ${item}`)),
+      "",
+      "Improvement Plan",
+      ...((report?.improvement_plan || []).map((item) => `- ${item}`)),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "twintalk-interview-report.txt";
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   const logout = () => {
@@ -1406,6 +1635,23 @@ export default function FeaturesPage() {
                       onChange={(event) => setSourceText(event.target.value)}
                       placeholder="Paste notes, GitHub repository summary, project explanation, or a topic you want assessed..."
                     />
+                    <div className="config-row">
+                      <label className="config-label">
+                        Interview length
+                        <select
+                          className="select-input"
+                          value={questionLimit}
+                          onChange={(event) => {
+                            setQuestionLimit(Number(event.target.value));
+                            setCurrentQuestionIndex(0);
+                          }}
+                        >
+                          {questionCountOptions.map((count) => (
+                            <option value={count} key={count}>{count} questions</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
                     {workflowMessage && <p className="status-text">{workflowMessage}</p>}
                     {workflowError && <p className="status-text error-text">{workflowError}</p>}
                   </div>
@@ -1420,6 +1666,9 @@ export default function FeaturesPage() {
                     {uploadPreview
                       ? uploadPreview
                       : "Generated questions appear here after the backend reads your uploaded file or pasted text."}
+                  </p>
+                  <p className="status-text">
+                    Selected round: {questionLimit} question{questionLimit === 1 ? "" : "s"} · {difficultyLabels[selectedDifficulty]} first
                   </p>
                   <div className="difficulty-row">
                     {Object.entries(difficultyLabels).map(([key, label]) => (
@@ -1437,16 +1686,16 @@ export default function FeaturesPage() {
                     ))}
                   </div>
                   <div className="insight-list">
-                    {activeQuestions.length ? (
-                      activeQuestions.map((question, index) => (
+                    {questionQueue.length ? (
+                      questionQueue.map((item, index) => (
                         <button
                           type="button"
                           className={`insight-item ${index === currentQuestionIndex ? "tag active" : ""}`}
-                          key={question}
+                          key={`${item.difficulty}-${item.question}`}
                           onClick={() => setCurrentQuestionIndex(index)}
                           style={{ textAlign: "left", cursor: "pointer" }}
                         >
-                          {index + 1}. {question}
+                          {index + 1}. [{difficultyLabels[item.difficulty]}] {item.question}
                         </button>
                       ))
                     ) : (
@@ -1470,7 +1719,9 @@ export default function FeaturesPage() {
                 <div className="camera-top">
                   <div>
                     <span className="status-pill"><span className="signal-dot" />Secure interview running</span>
-                    <h2 className="panel-title" style={{ marginTop: 6 }}>Technical depth round</h2>
+                    <h2 className="panel-title" style={{ marginTop: 6 }}>
+                      {interviewComplete ? "Interview complete" : "Technical depth round"}
+                    </h2>
                   </div>
                   <div className="action-row" style={{ marginTop: 0 }}>
                     <button
@@ -1480,8 +1731,13 @@ export default function FeaturesPage() {
                     >
                       <Icon name="expand" /> Fullscreen
                     </button>
-                    <button type="button" className="primary-btn" onClick={endInterview} disabled={isReporting}>
-                      {isReporting ? "Generating..." : "Generate Report"}
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      onClick={endInterview}
+                      disabled={isReporting || !interviewId}
+                    >
+                      {isReporting ? "Generating..." : interviewComplete ? "Generate Final Report" : "Generate Report"}
                     </button>
                   </div>
                 </div>
@@ -1501,11 +1757,23 @@ export default function FeaturesPage() {
 
                 <div className="camera-bottom">
                   <div className="question-card">
-                    <small>
-                      Question {Math.min(currentQuestionIndex + 1, activeQuestions.length || 1)} of {activeQuestions.length || 1}
-                      {" "}· {difficultyLabels[selectedDifficulty]} · Generated from uploaded source
-                    </small>
-                    <h3>{activeQuestion || "No generated question found. Go back and generate questions first."}</h3>
+                    {interviewComplete ? (
+                      <>
+                        <small>{answeredCount} answers submitted · Ready for report</small>
+                        <h3>Interview complete. Click Generate Final Report to review your performance.</h3>
+                        <div className="completion-panel">
+                          All selected questions have been answered and evaluated. You can generate the final report now.
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <small>
+                          Question {Math.min(currentQuestionIndex + 1, questionQueue.length || 1)} of {questionQueue.length || 1}
+                          {" "}· {difficultyLabels[activeDifficulty]} · Generated from uploaded source
+                        </small>
+                        <h3>{activeQuestion || "No generated question found. Go back and generate questions first."}</h3>
+                      </>
+                    )}
                     {latestEvaluation?.summary && (
                       <p className="panel-copy">Last feedback: {latestEvaluation.summary}</p>
                     )}
@@ -1518,16 +1786,33 @@ export default function FeaturesPage() {
                       className="answer-box"
                       value={answerText}
                       onChange={(event) => setAnswerText(event.target.value)}
-                      placeholder="Type your answer here..."
+                      disabled={interviewComplete}
+                      placeholder={interviewComplete ? "Interview complete" : "Type your answer here or use voice..."}
                     />
+                    {interimTranscript && <p className="panel-copy">Listening: {interimTranscript}</p>}
+                    <div className="voice-row">
+                      <button
+                        type="button"
+                        className="ghost-btn"
+                        onClick={isListening ? stopVoiceInput : startVoiceInput}
+                        disabled={!speechSupported || interviewComplete}
+                      >
+                        <Icon name="mic" /> {isListening ? "Stop Voice" : "Use Voice"}
+                      </button>
+                      {!speechSupported && <p className="panel-copy">Voice input is not supported in this browser.</p>}
+                    </div>
                     <button
                       type="button"
                       className="primary-btn"
                       onClick={submitAnswer}
-                      disabled={isEvaluating || !activeQuestion}
+                      disabled={isEvaluating || !activeQuestion || interviewComplete}
                       style={{ width: "100%", marginTop: 10 }}
                     >
-                      {isEvaluating ? "Evaluating..." : "Submit Answer"}
+                      {isEvaluating
+                        ? "Evaluating..."
+                        : currentQuestionIndex === questionQueue.length - 1
+                          ? "Submit Final Answer"
+                          : "Submit Answer"}
                     </button>
                   </div>
                 </div>
@@ -1566,55 +1851,80 @@ export default function FeaturesPage() {
               <div className="section-head">
                 <div>
                   <span className="eyebrow"><span className="signal-dot" />Session Report</span>
-                  <h1 className="section-title">Latest readiness analysis</h1>
+                  <h1 className="section-title">Interview performance report</h1>
                   <p className="section-copy">
                     Generated for {currentUser.name || "the current user"} after the adaptive interview session.
                   </p>
                 </div>
-                <button type="button" className="ghost-btn" onClick={() => setView("reports")}>
-                  <Icon name="report" /> Open Report History
-                </button>
-              </div>
-
-              <div className="metrics-grid">
-                <div className="metric-card">
-                  <div className="metric-label">Overall readiness</div>
-                  <div className="metric-value">{liveAverageScore}%</div>
-                </div>
-                <div className="metric-card">
-                  <div className="metric-label">Rule violations</div>
-                  <div className="metric-value">{violations}</div>
-                </div>
-                <div className="metric-card">
-                  <div className="metric-label">Answers evaluated</div>
-                  <div className="metric-value">{evaluations.length}</div>
+                <div className="action-row" style={{ marginTop: 0 }}>
+                  <button type="button" className="ghost-btn" onClick={() => setView("assess")}>
+                    <Icon name="upload" /> New Interview
+                  </button>
+                  <button type="button" className="primary-btn" onClick={downloadReport} disabled={!generatedReport}>
+                    <Icon name="report" /> Download Report
+                  </button>
                 </div>
               </div>
 
-              <div className="workflow-layout" style={{ marginTop: 18 }}>
-                <article className="panel">
-                  <h2 className="section-title" style={{ fontSize: "1.55rem" }}>Assessment scales</h2>
-                  <ScoreLines scores={liveScores} />
-                </article>
-                <article className="panel">
-                  <h2 className="section-title" style={{ fontSize: "1.55rem" }}>Personalized recommendations</h2>
-                  <div className="insight-list">
-                    {generatedReport ? (
-                      <>
-                        <div className="insight-item">{generatedReport.summary}</div>
-                        {(generatedReport.improvement_plan || []).map((item) => (
-                          <div className="insight-item" key={item}>{item}</div>
-                        ))}
-                      </>
-                    ) : (
-                      <>
-                        <div className="insight-item">Submit at least one answer before generating a report.</div>
-                        {workflowError && <div className="insight-item">{workflowError}</div>}
-                      </>
-                    )}
+              <article className="report-document">
+                <section className="report-section">
+                  <h2>Overview</h2>
+                  <p>
+                    {generatedReport?.summary ||
+                      "Submit at least one answer and generate the final report to see the full review."}
+                  </p>
+                  {workflowError && <p className="error-text">{workflowError}</p>}
+                </section>
+
+                <section className="report-section">
+                  <h2>Session Details</h2>
+                  <div className="report-kv">
+                    <div><span>Candidate</span><strong>{currentUser.name || currentUser.email || "Current user"}</strong></div>
+                    <div><span>Source</span><strong>{uploadedFile?.name || "Pasted text"}</strong></div>
+                    <div><span>Questions answered</span><strong>{evaluations.length}</strong></div>
+                    <div><span>Rule violations</span><strong>{violations}</strong></div>
                   </div>
-                </article>
-              </div>
+                </section>
+
+                <section className="report-section">
+                  <h2>Scores</h2>
+                  <div className="report-kv">
+                    <div><span>Overall score</span><strong>{generatedReport?.overall_score ?? Math.round(liveAverageScore / 10)}/10</strong></div>
+                    <div><span>Confidence</span><strong>{generatedReport?.confidence_score ?? "N/A"}/10</strong></div>
+                    <div><span>Technical accuracy</span><strong>{generatedReport?.technical_accuracy ?? "N/A"}/10</strong></div>
+                    <div><span>Communication</span><strong>{generatedReport?.communication ?? "N/A"}/10</strong></div>
+                    <div><span>Hesitation</span><strong>{generatedReport?.hesitation || "N/A"}</strong></div>
+                    <div><span>Eye contact</span><strong>{generatedReport?.eye_contact || "N/A"}</strong></div>
+                  </div>
+                </section>
+
+                <section className="report-section">
+                  <h2>Strengths</h2>
+                  {generatedReport?.strengths?.length ? (
+                    <ul>{generatedReport.strengths.map((item) => <li key={item}>{item}</li>)}</ul>
+                  ) : (
+                    <p>Strengths will appear after the AI report is generated.</p>
+                  )}
+                </section>
+
+                <section className="report-section">
+                  <h2>Weaknesses</h2>
+                  {generatedReport?.weaknesses?.length ? (
+                    <ul>{generatedReport.weaknesses.map((item) => <li key={item}>{item}</li>)}</ul>
+                  ) : (
+                    <p>Weak areas will appear after the AI report is generated.</p>
+                  )}
+                </section>
+
+                <section className="report-section">
+                  <h2>Improvement Plan</h2>
+                  {generatedReport?.improvement_plan?.length ? (
+                    <ol>{generatedReport.improvement_plan.map((item) => <li key={item}>{item}</li>)}</ol>
+                  ) : (
+                    <p>Generate the report after the interview to receive personalized next steps.</p>
+                  )}
+                </section>
+              </article>
             </section>
           )}
         </main>
