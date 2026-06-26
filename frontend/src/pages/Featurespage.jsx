@@ -625,6 +625,117 @@ const styles = `
     grid-template-rows: auto 1fr auto;
   }
 
+  /* ── Timer display ── */
+  .interview-timer {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    background: rgba(0,0,0,0.55);
+    border: 1px solid rgba(255,255,255,0.12);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.05rem;
+    color: #e2ffd6;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+  }
+
+  .timer-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4ade80;
+    box-shadow: 0 0 10px #4ade80;
+    animation: timerPulse 1s ease-in-out infinite;
+  }
+
+  @keyframes timerPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  /* ── Violation popup ── */
+  .violation-popup {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 22px;
+    border-radius: 14px;
+    background: rgba(220, 38, 38, 0.92);
+    border: 1px solid rgba(255, 100, 100, 0.6);
+    box-shadow: 0 8px 32px rgba(220, 38, 38, 0.5);
+    color: #fff;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.88rem;
+    letter-spacing: 0.05em;
+    animation: popIn 0.25s ease;
+  }
+
+  @keyframes popIn {
+    from { opacity: 0; transform: translateX(-50%) scale(0.9); }
+    to   { opacity: 1; transform: translateX(-50%) scale(1); }
+  }
+
+  /* ── Skip button ── */
+  .skip-btn {
+    min-height: 38px;
+    border-radius: 999px;
+    border: 1px solid rgba(253, 186, 116, 0.4);
+    padding: 8px 16px;
+    color: rgba(253, 186, 116, 0.9);
+    background: rgba(251, 146, 60, 0.1);
+    cursor: pointer;
+    font: inherit;
+    font-weight: 600;
+    transition: background 0.2s, border-color 0.2s;
+  }
+
+  .skip-btn:hover:not(:disabled) {
+    background: rgba(251, 146, 60, 0.22);
+    border-color: rgba(253, 186, 116, 0.7);
+  }
+
+  .skip-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  /* ── Generate Report button turns green when interview is complete ── */
+  .report-btn-ready {
+    border-color: rgba(134, 239, 172, 0.5) !important;
+    background: linear-gradient(135deg, #16a34a 0%, #15803d 60%, #166534 100%) !important;
+    box-shadow: 0 12px 40px rgba(22, 163, 74, 0.45) !important;
+  }
+
+  /* ── Video constrained to 70vh, zoomed out ── */
+  .camera-feed video {
+    width: 100%;
+    height: 100%;
+    max-height: 70vh;
+    object-fit: contain;
+    opacity: 0.9;
+    filter: saturate(0.9) contrast(1.05);
+    background: #050009;
+  }
+
+  .camera-feed {
+    position: relative;
+    display: grid;
+    place-items: center;
+    max-height: 70vh;
+    overflow: hidden;
+    background:
+      linear-gradient(120deg, rgba(117, 45, 204, 0.12), transparent 42%),
+      radial-gradient(circle at 50% 50%, rgba(177, 80, 255, 0.14), transparent 38%),
+      #050009;
+  }
+
   .camera-stage.fullscreen-mode {
     width: 100vw;
     height: 100vh;
@@ -651,25 +762,7 @@ const styles = `
     border-top: 1px solid rgba(218, 176, 255, 0.1);
   }
 
-  .camera-feed {
-    position: relative;
-    display: grid;
-    place-items: center;
-    min-height: 360px;
-    background:
-      linear-gradient(120deg, rgba(117, 45, 204, 0.12), transparent 42%),
-      radial-gradient(circle at 50% 50%, rgba(177, 80, 255, 0.14), transparent 38%),
-      #050009;
-  }
-
-  .camera-feed video {
-    width: 100%;
-    height: 100%;
-    min-height: 360px;
-    object-fit: cover;
-    opacity: 0.72;
-    filter: saturate(0.9) contrast(1.08);
-  }
+  /* camera-feed styles now defined above with 70vh constraint */
 
   .camera-placeholder {
     width: min(420px, 80%);
@@ -885,6 +978,12 @@ const styles = `
   }
 `;
 
+const formatTime = (totalSeconds) => {
+  const m = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
+  const s = (totalSeconds % 60).toString().padStart(2, "0");
+  return `${m}:${s}`;
+};
+
 const Icon = ({ name, size = 20 }) => {
   const common = {
     width: size,
@@ -1094,10 +1193,15 @@ export default function FeaturesPage() {
   const [cameraError, setCameraError] = useState("");
   const [cameraReady, setCameraReady] = useState(false);
   const [isInterviewFullscreen, setIsInterviewFullscreen] = useState(false);
+  const [interviewStartedAt, setInterviewStartedAt] = useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [skippedQuestions, setSkippedQuestions] = useState([]);
+  const [violationPopup, setViolationPopup] = useState(false);
   const cameraRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const recognitionRef = useRef(null);
+  const timerRef = useRef(null);
 
   const currentUser = useMemo(() => {
     try {
@@ -1149,6 +1253,8 @@ export default function FeaturesPage() {
       setIsInterviewFullscreen(stageIsFullscreen);
       if (sessionActive && !sessionDone && !stageIsFullscreen) {
         setViolations((count) => count + 1);
+        setViolationPopup(true);
+        setTimeout(() => setViolationPopup(false), 3500);
       }
     };
 
@@ -1191,6 +1297,19 @@ export default function FeaturesPage() {
       recognitionRef.current?.stop?.();
     };
   }, []);
+
+  // Interview elapsed timer
+  useEffect(() => {
+    if (sessionActive && !interviewComplete) {
+      if (!interviewStartedAt) setInterviewStartedAt(Date.now());
+      timerRef.current = setInterval(() => {
+        setElapsedSeconds(Math.floor((Date.now() - (interviewStartedAt || Date.now())) / 1000));
+      }, 1000);
+    } else {
+      clearInterval(timerRef.current);
+    }
+    return () => clearInterval(timerRef.current);
+  }, [sessionActive, interviewComplete, interviewStartedAt]);
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0] || null;
@@ -1286,6 +1405,10 @@ export default function FeaturesPage() {
     setAnswerText("");
     setLatestEvaluation(null);
     setIsPreparing(false);
+    setElapsedSeconds(0);
+    setInterviewStartedAt(Date.now());
+    setSkippedQuestions([]);
+    setViolationPopup(false);
 
     try {
       if (cameraRef.current?.requestFullscreen) {
@@ -1408,6 +1531,20 @@ export default function FeaturesPage() {
     }
   };
 
+  const skipQuestion = () => {
+    if (!activeQuestion || interviewComplete) return;
+    setSkippedQuestions((prev) => [...prev, { question: activeQuestion, difficulty: activeDifficulty }]);
+    setAnswerText("");
+    stopVoiceInput();
+    if (currentQuestionIndex < questionQueue.length - 1) {
+      setCurrentQuestionIndex((index) => index + 1);
+    } else {
+      setInterviewComplete(true);
+      setSessionActive(false);
+      setWorkflowMessage("Interview complete. Generate your final report when you are ready.");
+    }
+  };
+
   const endInterview = async () => {
     setIsReporting(true);
     setWorkflowError("");
@@ -1434,6 +1571,7 @@ export default function FeaturesPage() {
           body: JSON.stringify({
             interview_id: interviewId,
             user_email: currentUser.email || null,
+            skipped_questions: skippedQuestions,
           }),
         });
         const data = await response.json();
@@ -1459,6 +1597,8 @@ export default function FeaturesPage() {
       `Candidate: ${currentUser.name || currentUser.email || "Current user"}`,
       `Source: ${uploadedFile?.name || "Pasted text"}`,
       `Questions answered: ${evaluations.length}`,
+      `Questions skipped: ${skippedQuestions.length}`,
+      `Rule violations: ${violations}`,
       "",
       "Summary",
       report?.summary || "No generated summary available.",
@@ -1712,16 +1852,27 @@ export default function FeaturesPage() {
 
           {view === "interview" && (
             <section className="section">
+              {violationPopup && (
+                <div className="violation-popup">
+                  ⚠ FULLSCREEN VIOLATION — Minimizing is not allowed during the interview
+                </div>
+              )}
               <div
                 ref={cameraRef}
                 className={`camera-stage ${isInterviewFullscreen ? "fullscreen-mode" : ""}`}
               >
                 <div className="camera-top">
-                  <div>
-                    <span className="status-pill"><span className="signal-dot" />Secure interview running</span>
-                    <h2 className="panel-title" style={{ marginTop: 6 }}>
-                      {interviewComplete ? "Interview complete" : "Technical depth round"}
-                    </h2>
+                  <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                    <div className="interview-timer">
+                      <span className="timer-dot" />
+                      {formatTime(elapsedSeconds)}
+                    </div>
+                    <div>
+                      <span className="status-pill"><span className="signal-dot" />Secure interview running</span>
+                      <h2 className="panel-title" style={{ marginTop: 6 }}>
+                        {interviewComplete ? "Interview complete" : "Technical depth round"}
+                      </h2>
+                    </div>
                   </div>
                   <div className="action-row" style={{ marginTop: 0 }}>
                     <button
@@ -1733,7 +1884,7 @@ export default function FeaturesPage() {
                     </button>
                     <button
                       type="button"
-                      className="primary-btn"
+                      className={`primary-btn ${interviewComplete ? "report-btn-ready" : ""}`}
                       onClick={endInterview}
                       disabled={isReporting || !interviewId}
                     >
@@ -1798,6 +1949,15 @@ export default function FeaturesPage() {
                         disabled={!speechSupported || interviewComplete}
                       >
                         <Icon name="mic" /> {isListening ? "Stop Voice" : "Use Voice"}
+                      </button>
+                      <button
+                        type="button"
+                        className="skip-btn"
+                        onClick={skipQuestion}
+                        disabled={interviewComplete || !activeQuestion}
+                        title="Skip this question — will be recorded as skipped in your report"
+                      >
+                        Skip Question
                       </button>
                       {!speechSupported && <p className="panel-copy">Voice input is not supported in this browser.</p>}
                     </div>
@@ -1882,6 +2042,7 @@ export default function FeaturesPage() {
                     <div><span>Candidate</span><strong>{currentUser.name || currentUser.email || "Current user"}</strong></div>
                     <div><span>Source</span><strong>{uploadedFile?.name || "Pasted text"}</strong></div>
                     <div><span>Questions answered</span><strong>{evaluations.length}</strong></div>
+                    <div><span>Questions skipped</span><strong>{skippedQuestions.length}</strong></div>
                     <div><span>Rule violations</span><strong>{violations}</strong></div>
                   </div>
                 </section>

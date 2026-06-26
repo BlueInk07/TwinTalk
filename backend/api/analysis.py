@@ -24,6 +24,14 @@ def create_report(payload: FinalReportRequest):
     if payload.user_email and interview.get("user_email") != payload.user_email:
         raise HTTPException(status_code=403, detail="Interview does not belong to user")
 
+    # Persist skipped questions onto the interview document before generating report
+    if payload.skipped_questions:
+        interviews_collection.update_one(
+            {"_id": interview_id},
+            {"$set": {"skipped_questions": payload.skipped_questions}},
+        )
+        interview["skipped_questions"] = payload.skipped_questions
+
     try:
         report = generate_final_report(interview)
     except RuntimeError as exc:
