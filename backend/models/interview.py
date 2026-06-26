@@ -3,6 +3,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+
 class QuestionGenerationRequest(BaseModel):
     upload_id: str | None = None
     text: str | None = None
@@ -22,3 +23,4 @@ class AnswerEvaluationRequest(BaseModel):
 class FinalReportRequest(BaseModel):
     interview_id: str
     user_email: str | None = None
+    skipped_questions: list[dict[str, Any]] = []  # ← add this line
