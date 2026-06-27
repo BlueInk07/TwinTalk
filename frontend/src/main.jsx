@@ -8,8 +8,21 @@ import "./index.css";
 /* ─── Simple auth guard ───
    Redirects to "/" if user is not in sessionStorage */
 function ProtectedRoute({ children }) {
-  const user = sessionStorage.getItem("twintalk_user");
-  if (!user) return <Navigate to="/" replace />;
+  const isAuthed = (() => {
+    try {
+      const raw = localStorage.getItem("twintalk_user");
+      if (!raw) return false;
+      const parsed = JSON.parse(raw);
+      if (parsed._expiry && Date.now() > parsed._expiry) {
+        localStorage.removeItem("twintalk_user");
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  if (!isAuthed) return <Navigate to="/" replace />;
   return children;
 }
 

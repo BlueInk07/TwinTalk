@@ -128,6 +128,8 @@ SCORING RUBRIC — score each dimension 0–10:
 
 For strengths and weaknesses, be specific to what the candidate actually said — not generic feedback.
 
+The "summary" field must be exactly 1–2 plain sentences max. Format: was the answer on point? which relevant topics did they mention? what key thing was missing? No scores, no labels, no jargon. Example: "Answer was clear and covered the main boiling indicators. Missed the role of temperature timing in the process."
+
 Return ONLY this JSON:
 {{
   "confidence": 0,

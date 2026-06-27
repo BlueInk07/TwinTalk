@@ -347,11 +347,12 @@ export default function App() {
       })
       .then((data) => {
         if (data.status === "success") {
-          // Persist user info for FeaturesPage to use (optional)
-          sessionStorage.setItem("twintalk_user", JSON.stringify({
+          // Persist user info for 7 days
+          localStorage.setItem("twintalk_user", JSON.stringify({
             email: data.email,
             name: data.name,
             picture: data.picture,
+            _expiry: Date.now() + 7 * 24 * 60 * 60 * 1000,
           }));
           navigate("/features");
         } else {

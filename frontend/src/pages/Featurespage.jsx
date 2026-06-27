@@ -682,6 +682,43 @@ const styles = `
     to   { opacity: 1; transform: translateX(-50%) scale(1); }
   }
 
+  /* ── Fullscreen gate overlay ── */
+  .fullscreen-gate {
+    position: absolute;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(5, 0, 9, 0.94);
+    backdrop-filter: blur(12px);
+    border-radius: 24px;
+  }
+
+  .fullscreen-gate-box {
+    text-align: center;
+    max-width: 460px;
+    padding: 40px 32px;
+    border: 1px solid rgba(213, 169, 255, 0.2);
+    border-radius: 20px;
+    background: rgba(20, 5, 35, 0.85);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  }
+
+  /* ── Feedback summary (1-2 lines) ── */
+  .feedback-summary {
+    flex: 1;
+    font-size: 0.92rem;
+    color: rgba(248, 241, 255, 0.88);
+    line-height: 1.4;
+  }
+
+  .feedback-verdict {
+    font-size: 1.1rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
   /* ── Skip button ── */
   .skip-btn {
     min-height: 38px;
@@ -1197,6 +1234,7 @@ export default function FeaturesPage() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [skippedQuestions, setSkippedQuestions] = useState([]);
   const [violationPopup, setViolationPopup] = useState(false);
+  const [fullscreenRequired, setFullscreenRequired] = useState(false);
   const cameraRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -1205,7 +1243,15 @@ export default function FeaturesPage() {
 
   const currentUser = useMemo(() => {
     try {
-      return JSON.parse(sessionStorage.getItem("twintalk_user") || "{}");
+      const raw = localStorage.getItem("twintalk_user");
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      // Check expiry — 7 days
+      if (parsed._expiry && Date.now() > parsed._expiry) {
+        localStorage.removeItem("twintalk_user");
+        return {};
+      }
+      return parsed;
     } catch {
       return {};
     }
@@ -1395,7 +1441,7 @@ export default function FeaturesPage() {
 
     setView("interview");
     setSessionDone(false);
-    setSessionActive(true);
+    setSessionActive(false); // stays false until fullscreen confirmed
     setInterviewComplete(false);
     setEvaluations([]);
     setGeneratedReport(null);
@@ -1406,24 +1452,30 @@ export default function FeaturesPage() {
     setLatestEvaluation(null);
     setIsPreparing(false);
     setElapsedSeconds(0);
-    setInterviewStartedAt(Date.now());
+    setInterviewStartedAt(null);
     setSkippedQuestions([]);
     setViolationPopup(false);
-
-    try {
-      if (cameraRef.current?.requestFullscreen) {
-        await cameraRef.current.requestFullscreen();
-      }
-    } catch {
-      setCameraError("Fullscreen could not start automatically. Use the fullscreen button before answering.");
-    }
+    setFullscreenRequired(true); // show the fullscreen gate overlay
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       streamRef.current = stream;
       setCameraReady(true);
     } catch {
-      setCameraError("Camera or microphone permission is not available, so the preview is showing secure demo mode.");
+      setCameraError("Camera or microphone permission is not available.");
+    }
+  };
+
+  const activateFullscreenAndStart = async () => {
+    try {
+      if (cameraRef.current?.requestFullscreen) {
+        await cameraRef.current.requestFullscreen();
+      }
+      setFullscreenRequired(false);
+      setSessionActive(true);
+      setInterviewStartedAt(Date.now());
+    } catch {
+      setCameraError("Fullscreen failed. Please allow fullscreen in your browser settings.");
     }
   };
 
@@ -1434,7 +1486,8 @@ export default function FeaturesPage() {
     const recognition = new Recognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = "en-US";
+    recognition.maxAlternatives = 1;
+    recognition.lang = "en-IN"; // better for Indian English accents
 
     recognition.onresult = (event) => {
       let finalText = "";
@@ -1456,22 +1509,40 @@ export default function FeaturesPage() {
     };
 
     recognition.onerror = (event) => {
-      setWorkflowError(`Voice input error: ${event.error}`);
+      // no-speech is normal during pauses — don't stop, just ignore
+      if (event.error === "no-speech") return;
+      // network errors: try to restart
+      if (event.error === "network") {
+        try { recognition.stop(); } catch {}
+        setTimeout(() => { if (isListening) recognition.start(); }, 300);
+        return;
+      }
+      // aborted means we stopped it ourselves — don't show error
+      if (event.error === "aborted") return;
+      setWorkflowError(`Voice error: ${event.error}. Try clicking Use Voice again.`);
       setIsListening(false);
     };
 
     recognition.onend = () => {
-      setIsListening(false);
-      setInterimTranscript("");
+      // Auto-restart as long as isListening is still true (user hasn't clicked Stop)
+      // Use a ref so the closure captures the latest value
+      if (recognitionRef._shouldRestart) {
+        try { recognition.start(); } catch {}
+      } else {
+        setIsListening(false);
+        setInterimTranscript("");
+      }
     };
 
     recognitionRef.current = recognition;
+    recognitionRef._shouldRestart = true;
     recognition.start();
     setWorkflowError("");
     setIsListening(true);
   };
 
   const stopVoiceInput = () => {
+    recognitionRef._shouldRestart = false;
     recognitionRef.current?.stop?.();
     setIsListening(false);
     setInterimTranscript("");
@@ -1630,7 +1701,7 @@ export default function FeaturesPage() {
   };
 
   const logout = () => {
-    sessionStorage.removeItem("twintalk_user");
+    localStorage.removeItem("twintalk_user");
     window.location.href = "/";
   };
 
@@ -1744,10 +1815,6 @@ export default function FeaturesPage() {
                 <div>
                   <span className="eyebrow"><span className="signal-dot" />New Session</span>
                   <h1 className="section-title">Upload, analyze, interview</h1>
-                  <p className="section-copy">
-                    Upload a PDF, DOCX, or TXT file, or paste notes. TwinTalk will extract the content,
-                    generate interview questions, and evaluate your answers through the backend.
-                  </p>
                 </div>
                 <button type="button" className="primary-btn" onClick={startInterview} disabled={isPreparing}>
                   <Icon name="camera" /> {isPreparing ? "Preparing..." : "Start Interview"}
@@ -1759,9 +1826,6 @@ export default function FeaturesPage() {
                   <div>
                     <div className="upload-icon" style={{ margin: "0 auto 18px" }}><Icon name="upload" /></div>
                     <h2 className="panel-title">Upload documents or media</h2>
-                    <p className="panel-copy">
-                      Accepts PDF, images, documents, slides, screenshots, text exports, and other learning evidence.
-                    </p>
                     <div style={{ marginTop: 20 }}>
                       <input
                         type="file"
@@ -1861,6 +1925,32 @@ export default function FeaturesPage() {
                 ref={cameraRef}
                 className={`camera-stage ${isInterviewFullscreen ? "fullscreen-mode" : ""}`}
               >
+                {/* Fullscreen gate — blocks interview until candidate enables fullscreen */}
+                {fullscreenRequired && (
+                  <div className="fullscreen-gate">
+                    <div className="fullscreen-gate-box">
+                      <div style={{ fontSize: "2.5rem", marginBottom: 12 }}>🖥</div>
+                      <h2 style={{ fontFamily: "Orbitron, sans-serif", fontSize: "1.3rem", marginBottom: 10 }}>
+                        Fullscreen Required
+                      </h2>
+                      <p style={{ opacity: 0.75, marginBottom: 24, fontSize: "0.95rem", lineHeight: 1.5 }}>
+                        This interview must be taken in fullscreen mode to prevent distractions and ensure integrity.
+                        Exiting fullscreen during the interview will be recorded as a violation.
+                      </p>
+                      <button
+                        type="button"
+                        className="primary-btn"
+                        onClick={activateFullscreenAndStart}
+                        style={{ fontSize: "1rem", padding: "14px 32px" }}
+                      >
+                        Enable Fullscreen &amp; Start Interview
+                      </button>
+                      {cameraError && (
+                        <p style={{ color: "#f0abfc", marginTop: 14, fontSize: "0.85rem" }}>{cameraError}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
                 <div className="camera-top">
                   <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
                     <div className="interview-timer">
@@ -1907,32 +1997,37 @@ export default function FeaturesPage() {
                 </div>
 
                 <div className="camera-bottom">
-                  <div className="question-card">
+                  <div style={{ width: "100%" }}>
                     {interviewComplete ? (
-                      <>
+                      <div className="question-card-bar completion-bar">
                         <small>{answeredCount} answers submitted · Ready for report</small>
                         <h3>Interview complete. Click Generate Final Report to review your performance.</h3>
-                        <div className="completion-panel">
-                          All selected questions have been answered and evaluated. You can generate the final report now.
-                        </div>
-                      </>
+                      </div>
                     ) : (
                       <>
-                        <small>
-                          Question {Math.min(currentQuestionIndex + 1, questionQueue.length || 1)} of {questionQueue.length || 1}
-                          {" "}· {difficultyLabels[activeDifficulty]} · Generated from uploaded source
-                        </small>
-                        <h3>{activeQuestion || "No generated question found. Go back and generate questions first."}</h3>
+                        <div className="question-card-bar">
+                          <div className="qcard-meta">
+                            Question {Math.min(currentQuestionIndex + 1, questionQueue.length || 1)} of {questionQueue.length || 1}
+                            <span className={`diff-badge diff-${activeDifficulty}`}>{difficultyLabels[activeDifficulty]}</span>
+                          </div>
+                          <div className="qcard-text">{activeQuestion || "No question found. Go back and generate questions first."}</div>
+                        </div>
+                        {latestEvaluation && (
+                          <div className="feedback-bar">
+                            <span className="feedback-label">Last feedback:</span>
+                            <span className={`feedback-verdict ${latestEvaluation.overall_score >= 7 ? "verdict-good" : latestEvaluation.overall_score >= 4 ? "verdict-mid" : "verdict-low"}`}>
+                              {latestEvaluation.overall_score >= 7 ? "✓" : latestEvaluation.overall_score >= 4 ? "~" : "✗"}
+                            </span>
+                            <span className="feedback-summary">{latestEvaluation.summary}</span>
+                          </div>
+                        )}
                       </>
                     )}
-                    {latestEvaluation?.summary && (
-                      <p className="panel-copy">Last feedback: {latestEvaluation.summary}</p>
-                    )}
-                    {cameraError && <p className="panel-copy" style={{ color: "#f0abfc" }}>{cameraError}</p>}
-                    {workflowError && <p className="panel-copy" style={{ color: "#f0abfc" }}>{workflowError}</p>}
-                    <p className="panel-copy">Rule violations recorded: {violations}</p>
+                    {cameraError && <p className="panel-copy" style={{ color: "#f0abfc", marginTop: 6 }}>{cameraError}</p>}
+                    {workflowError && <p className="panel-copy" style={{ color: "#f0abfc", marginTop: 6 }}>{workflowError}</p>}
+                    <p className="panel-copy" style={{ marginTop: 4, fontSize: "0.8rem", opacity: 0.6 }}>Violations: {violations}</p>
                   </div>
-                  <div>
+                  <div className="answer-controls">
                     <textarea
                       className="answer-box"
                       value={answerText}
@@ -1940,26 +2035,27 @@ export default function FeaturesPage() {
                       disabled={interviewComplete}
                       placeholder={interviewComplete ? "Interview complete" : "Type your answer here or use voice..."}
                     />
-                    {interimTranscript && <p className="panel-copy">Listening: {interimTranscript}</p>}
+                    {interimTranscript && (
+                      <p className="panel-copy listening-indicator">🎙 {interimTranscript}</p>
+                    )}
                     <div className="voice-row">
                       <button
                         type="button"
-                        className="ghost-btn"
+                        className={`ghost-btn ${isListening ? "listening-active" : ""}`}
                         onClick={isListening ? stopVoiceInput : startVoiceInput}
                         disabled={!speechSupported || interviewComplete}
                       >
-                        <Icon name="mic" /> {isListening ? "Stop Voice" : "Use Voice"}
+                        <Icon name="mic" /> {isListening ? "● Stop Voice" : "Use Voice"}
                       </button>
                       <button
                         type="button"
                         className="skip-btn"
                         onClick={skipQuestion}
                         disabled={interviewComplete || !activeQuestion}
-                        title="Skip this question — will be recorded as skipped in your report"
                       >
                         Skip Question
                       </button>
-                      {!speechSupported && <p className="panel-copy">Voice input is not supported in this browser.</p>}
+                      {!speechSupported && <p className="panel-copy">Voice not supported in this browser.</p>}
                     </div>
                     <button
                       type="button"
