@@ -753,7 +753,6 @@ const styles = `
     flex-shrink: 0;
   }
 
-  /* ── Left side card — Question ── */
   .interview-question-card {
     border-radius: 20px;
     border: 1px solid rgba(218, 176, 255, 0.18);
@@ -762,6 +761,7 @@ const styles = `
       radial-gradient(circle at 20% 0%, rgba(200, 100, 255, 0.14), transparent 55%);
     display: flex;
     flex-direction: column;
+    justify-content: space-between;
     gap: 16px;
     padding: 22px 20px;
     overflow: hidden;
@@ -785,7 +785,7 @@ const styles = `
 
   .iq-text {
     font-family: 'Rajdhani', sans-serif;
-    font-size: 1.22rem;
+    font-size: 1.45rem;
     font-weight: 600;
     line-height: 1.55;
     color: #f0e6ff;
@@ -797,6 +797,32 @@ const styles = `
     display: flex;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .violations-tile {
+    padding: 8px 14px;
+    border-radius: 10px;
+    background: rgba(220, 38, 38, 0.18);
+    border: 1px solid rgba(248, 113, 113, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .violations-tile-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    color: rgba(248, 113, 113, 0.8);
+    text-transform: uppercase;
+  }
+
+  .violations-tile-count {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #f87171;
   }
 
   /* ── Right side card — Feedback ── */
@@ -844,7 +870,7 @@ const styles = `
 
   .if-summary {
     font-family: 'Space Grotesk', sans-serif;
-    font-size: 1.05rem;
+    font-size: 1.18rem;
     color: rgba(255, 240, 190, 0.92);
     line-height: 1.6;
     flex: 1;
@@ -1552,7 +1578,7 @@ export default function FeaturesPage() {
     if (cameraReady && videoRef.current && streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
     }
-  }, [cameraReady]);
+  }, [cameraReady, isInterviewFullscreen]);
 
   useEffect(() => {
     if (!sessionActive || !activeQuestion || !("speechSynthesis" in window)) return;
@@ -2312,7 +2338,10 @@ export default function FeaturesPage() {
                       <div className="iq-controls">
                         {cameraError && <p style={{ color: "#f0abfc", fontSize: "0.82rem" }}>{cameraError}</p>}
                         {workflowError && <p style={{ color: "#f0abfc", fontSize: "0.82rem" }}>{workflowError}</p>}
-                        <p style={{ fontSize: "0.75rem", opacity: 0.4 }}>Violations: {violations}</p>
+                        <div className="violations-tile">
+                          <span className="violations-tile-label">⚠ Rule Violations</span>
+                          <span className="violations-tile-count">{violations}</span>
+                        </div>
                       </div>
                     </div>
 
