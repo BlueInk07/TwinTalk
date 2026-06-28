@@ -4,7 +4,7 @@ from bson import ObjectId
 from fastapi import APIRouter, HTTPException
 
 from database.mongo import interviews_collection, reports_collection
-from models.interview import FinalReportRequest
+from models.interview import FinalReportRequest  # ensure violation_log: list = [] added to model
 from services.ai_service import generate_final_report
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
@@ -24,13 +24,16 @@ def create_report(payload: FinalReportRequest):
     if payload.user_email and interview.get("user_email") != payload.user_email:
         raise HTTPException(status_code=403, detail="Interview does not belong to user")
 
-    # Persist skipped questions onto the interview document before generating report
+    # Persist skipped questions and violation log onto the interview document
+    update_fields = {}
     if payload.skipped_questions:
-        interviews_collection.update_one(
-            {"_id": interview_id},
-            {"$set": {"skipped_questions": payload.skipped_questions}},
-        )
-        interview["skipped_questions"] = payload.skipped_questions
+        update_fields["skipped_questions"] = payload.skipped_questions
+    if payload.violation_log:
+        update_fields["violation_log"] = payload.violation_log
+        update_fields["total_outside_fullscreen_seconds"] = payload.total_outside_fullscreen_seconds or 0
+    if update_fields:
+        interviews_collection.update_one({"_id": interview_id}, {"$set": update_fields})
+        interview.update(update_fields)
 
     try:
         report = generate_final_report(interview)

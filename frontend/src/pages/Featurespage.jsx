@@ -617,15 +617,27 @@ const styles = `
   }
 
   /* ══════════════════════════════════════════
-     INTERVIEW LAYOUT — 3 column: Q | Video | Feedback
+     INTERVIEW LAYOUT — default: video stacked
+     Inside fullscreen: 3 column Q | Video | Feedback
      ══════════════════════════════════════════ */
 
   .interview-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* Only go 3-column when the camera-stage is fullscreen */
+  :fullscreen .interview-layout,
+  :-webkit-full-screen .interview-layout {
     display: grid;
     grid-template-columns: 1fr 2fr 1fr;
     gap: 14px;
     align-items: stretch;
-    min-height: 78vh;
+    height: 100vh;
+    padding: 14px;
+    box-sizing: border-box;
+    background: #030006;
   }
 
   /* ── Camera stage (centre column) ── */
@@ -781,6 +793,17 @@ const styles = `
     display: flex;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .timer-paused {
+    color: #f87171 !important;
+    border-color: rgba(248, 113, 113, 0.4) !important;
+    animation: pausedPulse 1.2s ease-in-out infinite;
+  }
+
+  @keyframes pausedPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
   }
 
   /* ── Timer display ── */
@@ -1347,6 +1370,10 @@ export default function FeaturesPage() {
   const [skippedQuestions, setSkippedQuestions] = useState([]);
   const [violationPopup, setViolationPopup] = useState(false);
   const [fullscreenRequired, setFullscreenRequired] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [pauseStartedAt, setPauseStartedAt] = useState(null);
+  const [violationLog, setViolationLog] = useState([]); // [{violationNumber, startedAt, duration}]
+  const pauseAccumulatedRef = useRef(0); // total seconds accumulated before current pause
   const cameraRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -1409,16 +1436,47 @@ export default function FeaturesPage() {
     const handleFullscreenChange = () => {
       const stageIsFullscreen = document.fullscreenElement === cameraRef.current;
       setIsInterviewFullscreen(stageIsFullscreen);
-      if (sessionActive && !sessionDone && !stageIsFullscreen) {
-        setViolations((count) => count + 1);
-        setViolationPopup(true);
-        setTimeout(() => setViolationPopup(false), 3500);
+
+      if (sessionActive && !sessionDone) {
+        if (!stageIsFullscreen) {
+          // EXIT fullscreen — pause timer, start violation
+          const now = Date.now();
+          setIsPaused(true);
+          setPauseStartedAt(now);
+          // Snapshot accumulated time so timer can resume correctly
+          pauseAccumulatedRef.current = elapsedSeconds;
+          setViolations((c) => c + 1);
+          setViolationPopup(true);
+          setTimeout(() => setViolationPopup(false), 5000);
+          // Stop TTS so question doesn't keep speaking while paused
+          window.speechSynthesis?.cancel();
+          // Stop voice recognition while paused
+          stopVoiceInput();
+        } else {
+          // RE-ENTER fullscreen — resume timer, log violation duration
+          const now = Date.now();
+          setIsPaused(false);
+          if (pauseStartedAt) {
+            const outsideSeconds = Math.round((now - pauseStartedAt) / 1000);
+            setViolationLog((prev) => [
+              ...prev,
+              {
+                violationNumber: prev.length + 1,
+                duration: outsideSeconds,
+              },
+            ]);
+          }
+          setPauseStartedAt(null);
+          // Resume timer from where it was
+          setInterviewStartedAt(Date.now() - pauseAccumulatedRef.current * 1000);
+        }
       }
     };
 
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, [sessionActive, sessionDone]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionActive, sessionDone, elapsedSeconds, pauseStartedAt]);
 
   useEffect(() => {
     return () => {
@@ -1456,9 +1514,9 @@ export default function FeaturesPage() {
     };
   }, []);
 
-  // Interview elapsed timer
+  // Interview elapsed timer — pauses when candidate exits fullscreen
   useEffect(() => {
-    if (sessionActive && !interviewComplete) {
+    if (sessionActive && !interviewComplete && !isPaused) {
       if (!interviewStartedAt) setInterviewStartedAt(Date.now());
       timerRef.current = setInterval(() => {
         setElapsedSeconds(Math.floor((Date.now() - (interviewStartedAt || Date.now())) / 1000));
@@ -1467,7 +1525,7 @@ export default function FeaturesPage() {
       clearInterval(timerRef.current);
     }
     return () => clearInterval(timerRef.current);
-  }, [sessionActive, interviewComplete, interviewStartedAt]);
+  }, [sessionActive, interviewComplete, interviewStartedAt, isPaused]);
 
   const handleFileChange = (event) => {
     const file = event.target.files?.[0] || null;
@@ -1567,6 +1625,10 @@ export default function FeaturesPage() {
     setInterviewStartedAt(null);
     setSkippedQuestions([]);
     setViolationPopup(false);
+    setIsPaused(false);
+    setPauseStartedAt(null);
+    setViolationLog([]);
+    pauseAccumulatedRef.current = 0;
     setFullscreenRequired(true); // show the fullscreen gate overlay
 
     try {
@@ -1755,6 +1817,8 @@ export default function FeaturesPage() {
             interview_id: interviewId,
             user_email: currentUser.email || null,
             skipped_questions: skippedQuestions,
+            violation_log: violationLog,
+            total_outside_fullscreen_seconds: violationLog.reduce((sum, v) => sum + v.duration, 0),
           }),
         });
         const data = await response.json();
@@ -1782,6 +1846,10 @@ export default function FeaturesPage() {
       `Questions answered: ${evaluations.length}`,
       `Questions skipped: ${skippedQuestions.length}`,
       `Rule violations: ${violations}`,
+      `Total time outside fullscreen: ${violationLog.reduce((sum, v) => sum + v.duration, 0)}s`,
+      ...(violationLog.length
+        ? violationLog.map((v) => `  Violation ${v.violationNumber}: ${v.duration}s outside fullscreen`)
+        : []),
       "",
       "Summary",
       report?.summary || "No generated summary available.",
@@ -2030,16 +2098,22 @@ export default function FeaturesPage() {
             <section className="section">
               {violationPopup && (
                 <div className="violation-popup">
-                  ⚠ FULLSCREEN VIOLATION — Minimizing is not allowed during the interview
+                  ⚠ FULLSCREEN EXITED — Timer paused. Return to fullscreen to resume your interview.
+                </div>
+              )}
+
+              {isPaused && !violationPopup && (
+                <div className="violation-popup" style={{ background: "rgba(180,30,30,0.96)" }}>
+                  ⏸ INTERVIEW PAUSED — You are outside fullscreen. Click Fullscreen to resume.
                 </div>
               )}
 
               {/* Top bar: timer + status + actions */}
               <div className="camera-top" style={{ borderRadius: 16, marginBottom: 12, border: "1px solid rgba(218,176,255,0.1)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                  <div className="interview-timer">
+                  <div className={`interview-timer ${isPaused ? "timer-paused" : ""}`}>
                     <span className="timer-dot" />
-                    {formatTime(elapsedSeconds)}
+                    {isPaused ? "PAUSED" : formatTime(elapsedSeconds)}
                   </div>
                   <div>
                     <span className="status-pill"><span className="signal-dot" />Secure interview running</span>
@@ -2148,9 +2222,9 @@ export default function FeaturesPage() {
                       className="answer-box"
                       value={answerText}
                       onChange={(event) => setAnswerText(event.target.value)}
-                      disabled={interviewComplete}
-                      placeholder={interviewComplete ? "Interview complete" : "Type your answer here or use voice..."}
-                      style={{ minHeight: 90 }}
+                      disabled={interviewComplete || isPaused}
+                      placeholder={isPaused ? "⏸ Interview paused — return to fullscreen to continue..." : interviewComplete ? "Interview complete" : "Type your answer here or use voice..."}
+                      style={{ minHeight: 90, opacity: isPaused ? 0.4 : 1 }}
                     />
                     {interimTranscript && (
                       <p className="panel-copy listening-indicator">🎙 {interimTranscript}</p>
@@ -2160,7 +2234,7 @@ export default function FeaturesPage() {
                         type="button"
                         className={`ghost-btn ${isListening ? "listening-active" : ""}`}
                         onClick={isListening ? stopVoiceInput : startVoiceInput}
-                        disabled={!speechSupported || interviewComplete}
+                        disabled={!speechSupported || interviewComplete || isPaused}
                       >
                         <Icon name="mic" /> {isListening ? "● Stop" : "Use Voice"}
                       </button>
@@ -2168,7 +2242,7 @@ export default function FeaturesPage() {
                         type="button"
                         className="skip-btn"
                         onClick={skipQuestion}
-                        disabled={interviewComplete || !activeQuestion}
+                        disabled={interviewComplete || !activeQuestion || isPaused}
                       >
                         Skip
                       </button>
@@ -2178,10 +2252,10 @@ export default function FeaturesPage() {
                       type="button"
                       className="primary-btn"
                       onClick={submitAnswer}
-                      disabled={isEvaluating || !activeQuestion || interviewComplete}
+                      disabled={isEvaluating || !activeQuestion || interviewComplete || isPaused}
                       style={{ width: "100%", marginTop: 6 }}
                     >
-                      {isEvaluating ? "Evaluating..." : currentQuestionIndex === questionQueue.length - 1 ? "Submit Final Answer" : "Submit Answer"}
+                      {isPaused ? "⏸ Paused — Return to fullscreen" : isEvaluating ? "Evaluating..." : currentQuestionIndex === questionQueue.length - 1 ? "Submit Final Answer" : "Submit Answer"}
                     </button>
                   </div>
                 </div>
@@ -2254,7 +2328,21 @@ export default function FeaturesPage() {
                     <div><span>Questions answered</span><strong>{evaluations.length}</strong></div>
                     <div><span>Questions skipped</span><strong>{skippedQuestions.length}</strong></div>
                     <div><span>Rule violations</span><strong>{violations}</strong></div>
+                    <div><span>Total time outside fullscreen</span><strong>{violationLog.reduce((sum, v) => sum + v.duration, 0)}s</strong></div>
                   </div>
+                  {violationLog.length > 0 && (
+                    <div style={{ marginTop: 14 }}>
+                      <p style={{ fontFamily: "Orbitron, sans-serif", fontSize: "0.78rem", color: "rgba(248,113,113,0.9)", letterSpacing: "0.06em", marginBottom: 8 }}>
+                        FULLSCREEN VIOLATION BREAKDOWN
+                      </p>
+                      {violationLog.map((v) => (
+                        <div key={v.violationNumber} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: "1px solid rgba(248,113,113,0.12)", color: "rgba(252,165,165,0.85)", fontFamily: "Space Grotesk, sans-serif", fontSize: "0.88rem" }}>
+                          <span>Violation {v.violationNumber}</span>
+                          <strong style={{ color: "#f87171" }}>{v.duration}s outside fullscreen</strong>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
 
                 <section className="report-section">

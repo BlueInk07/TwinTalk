@@ -24,3 +24,5 @@ class FinalReportRequest(BaseModel):
     interview_id: str
     user_email: str | None = None
     skipped_questions: list[dict[str, Any]] = []  # ← add this line
+    violation_log: list[dict] = []
+    total_outside_fullscreen_seconds: int = 0

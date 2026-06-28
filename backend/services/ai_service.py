@@ -151,6 +151,9 @@ def generate_final_report(interview: dict[str, Any]) -> dict[str, Any]:
     skipped = interview.get("skipped_questions", [])
     skipped_count = len(skipped)
     answered_count = len(interview.get("answers", []))
+    violation_log = interview.get("violation_log", [])
+    total_outside = interview.get("total_outside_fullscreen_seconds", 0)
+
     skipped_note = (
         f"\n\nNote: The candidate skipped {skipped_count} question(s): "
         + ", ".join(f'"{q.get("question", q)}"' for q in skipped)
@@ -158,13 +161,29 @@ def generate_final_report(interview: dict[str, Any]) -> dict[str, Any]:
         else "\n\nNote: The candidate did not skip any questions."
     )
 
+    violation_note = ""
+    if violation_log:
+        breakdown = ", ".join(
+            f"Violation {v.get('violationNumber', i+1)}: {v.get('duration', 0)}s"
+            for i, v in enumerate(violation_log)
+        )
+        violation_note = (
+            f"\n\nFullscreen violations: {len(violation_log)} total. "
+            f"Total time outside fullscreen: {total_outside}s. "
+            f"Breakdown — {breakdown}. "
+            f"Significant time outside fullscreen suggests possible academic dishonesty or distraction. "
+            f"Mention this in weaknesses if total exceeds 30 seconds."
+        )
+    else:
+        violation_note = "\n\nThe candidate remained in fullscreen for the entire interview."
+
     prompt = f"""
 Create a final mock-interview performance report from this interview data:
 {json.dumps(interview, default=str)[:14000]}
 
 Additional context:
 - Questions answered: {answered_count}
-- Questions skipped: {skipped_count}{skipped_note}
+- Questions skipped: {skipped_count}{skipped_note}{violation_note}
 
 Skipping questions should be reflected in the completeness and overall scores.
 A higher skip rate indicates lower preparedness and should lower the overall score meaningfully.
