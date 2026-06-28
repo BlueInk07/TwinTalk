@@ -616,28 +616,89 @@ const styles = `
     font-family: 'Space Grotesk', sans-serif;
   }
 
-  /* ══════════════════════════════════════════
-     INTERVIEW LAYOUT — default: video stacked
-     Inside fullscreen: 3 column Q | Video | Feedback
-     ══════════════════════════════════════════ */
-
-  .interview-layout {
+  /* ── Pre-fullscreen shell (camera only, no question/feedback) ── */
+  .pre-fs-shell {
     display: flex;
     flex-direction: column;
     gap: 14px;
   }
 
-  /* Only go 3-column when the camera-stage is fullscreen */
-  :fullscreen .interview-layout,
-  :-webkit-full-screen .interview-layout {
+  .pre-fs-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 12px 16px;
+    border-radius: 16px;
+    border: 1px solid rgba(218,176,255,0.1);
+    background: rgba(5,0,10,0.82);
+  }
+
+  .pre-fs-camera {
+    position: relative;
+    width: 100%;
+    height: 60vh;
+    border-radius: 20px;
+    overflow: hidden;
+    background: #050009;
+    border: 1px solid rgba(218,176,255,0.1);
+  }
+
+  /* ── Fullscreen interview root — takes over entire screen ── */
+  .fs-interview-root {
+    position: fixed;
+    inset: 0;
+    z-index: 9990;
+    background: #030006;
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    gap: 10px;
+    box-sizing: border-box;
+  }
+
+  .fs-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 10px 14px;
+    border-radius: 14px;
+    background: rgba(10,1,18,0.9);
+    border: 1px solid rgba(218,176,255,0.1);
+    flex-shrink: 0;
+  }
+
+  .fs-body {
+    flex: 1;
     display: grid;
     grid-template-columns: 1fr 2fr 1fr;
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .fs-camera-col {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .fs-camera {
+    flex: 1;
+    border-radius: 16px;
+    overflow: hidden;
+    background: #050009;
+    border: 1px solid rgba(218,176,255,0.08);
+    min-height: 0;
+  }
+
+  /* ══════════════════════════════════════════
+     INTERVIEW LAYOUT — kept for compatibility
+     ══════════════════════════════════════════ */
+  .interview-layout {
+    display: flex;
+    flex-direction: column;
     gap: 14px;
-    align-items: stretch;
-    height: 100vh;
-    padding: 14px;
-    box-sizing: border-box;
-    background: #030006;
   }
 
   /* ── Camera stage (centre column) ── */
@@ -704,6 +765,7 @@ const styles = `
     gap: 16px;
     padding: 22px 20px;
     overflow: hidden;
+    min-height: 0;
   }
 
   .iq-meta {
@@ -1434,7 +1496,7 @@ export default function FeaturesPage() {
 
   useEffect(() => {
     const handleFullscreenChange = () => {
-      const stageIsFullscreen = document.fullscreenElement === cameraRef.current;
+      const stageIsFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
       setIsInterviewFullscreen(stageIsFullscreen);
 
       if (sessionActive && !sessionDone) {
@@ -1642,9 +1704,10 @@ export default function FeaturesPage() {
 
   const activateFullscreenAndStart = async () => {
     try {
-      if (cameraRef.current?.requestFullscreen) {
-        await cameraRef.current.requestFullscreen();
-      }
+      // Fullscreen the entire page — not just the camera div
+      const el = document.documentElement;
+      if (el.requestFullscreen) await el.requestFullscreen();
+      else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
       setFullscreenRequired(false);
       setSessionActive(true);
       setInterviewStartedAt(Date.now());
@@ -1804,8 +1867,8 @@ export default function FeaturesPage() {
       setCameraReady(false);
     }
 
-    if (document.fullscreenElement && document.exitFullscreen) {
-      await document.exitFullscreen().catch(() => {});
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      await (document.exitFullscreen || document.webkitExitFullscreen)?.call(document).catch(() => {});
     }
 
     if (interviewId) {
@@ -2095,173 +2158,237 @@ export default function FeaturesPage() {
           )}
 
           {view === "interview" && (
-            <section className="section">
-              {violationPopup && (
-                <div className="violation-popup">
-                  ⚠ FULLSCREEN EXITED — Timer paused. Return to fullscreen to resume your interview.
-                </div>
-              )}
-
-              {isPaused && !violationPopup && (
-                <div className="violation-popup" style={{ background: "rgba(180,30,30,0.96)" }}>
-                  ⏸ INTERVIEW PAUSED — You are outside fullscreen. Click Fullscreen to resume.
-                </div>
-              )}
-
-              {/* Top bar: timer + status + actions */}
-              <div className="camera-top" style={{ borderRadius: 16, marginBottom: 12, border: "1px solid rgba(218,176,255,0.1)" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                  <div className={`interview-timer ${isPaused ? "timer-paused" : ""}`}>
-                    <span className="timer-dot" />
-                    {isPaused ? "PAUSED" : formatTime(elapsedSeconds)}
-                  </div>
-                  <div>
-                    <span className="status-pill"><span className="signal-dot" />Secure interview running</span>
-                    <h2 className="panel-title" style={{ marginTop: 4, fontSize: "0.95rem" }}>
-                      {interviewComplete ? "Interview complete" : "Technical depth round"}
-                    </h2>
-                  </div>
-                </div>
-                <div className="action-row" style={{ marginTop: 0 }}>
-                  <button type="button" className="ghost-btn" onClick={() => cameraRef.current?.requestFullscreen?.()}>
-                    <Icon name="expand" /> Fullscreen
-                  </button>
-                  <button
-                    type="button"
-                    className={`primary-btn ${interviewComplete ? "report-btn-ready" : ""}`}
-                    onClick={endInterview}
-                    disabled={isReporting || !interviewId}
-                  >
-                    {isReporting ? "Generating..." : interviewComplete ? "Generate Final Report" : "Generate Report"}
-                  </button>
-                </div>
-              </div>
-
-              {/* 3-column interview layout */}
-              <div className="interview-layout">
-
-                {/* LEFT — Question card */}
-                <div className="interview-question-card">
-                  <div className="iq-meta">
-                    <span className="iq-label">
-                      Question {Math.min(currentQuestionIndex + 1, questionQueue.length || 1)} of {questionQueue.length || 1}
-                    </span>
-                    <span className={`diff-badge diff-${activeDifficulty}`}>{difficultyLabels[activeDifficulty]}</span>
-                    <span className="iq-label">· Generated from uploaded source</span>
-                  </div>
-
-                  {interviewComplete ? (
-                    <p className="iq-text" style={{ color: "#4ade80" }}>
-                      Interview complete. {answeredCount} answers submitted — ready for your report.
-                    </p>
-                  ) : (
-                    <p className="iq-text">
-                      {activeQuestion || "No question found. Go back and generate questions first."}
-                    </p>
-                  )}
-
-                  <div className="iq-controls">
-                    {cameraError && <p style={{ color: "#f0abfc", fontSize: "0.85rem" }}>{cameraError}</p>}
-                    {workflowError && <p style={{ color: "#f0abfc", fontSize: "0.85rem" }}>{workflowError}</p>}
-                    <p style={{ fontSize: "0.78rem", opacity: 0.5, marginBottom: 4 }}>Violations: {violations}</p>
-                  </div>
-                </div>
-
-                {/* CENTRE — Camera */}
-                <div ref={cameraRef} className={`camera-stage ${isInterviewFullscreen ? "fullscreen-mode" : ""}`}>
-                  {fullscreenRequired && (
-                    <div className="fullscreen-gate">
-                      <div className="fullscreen-gate-box">
-                        <div style={{ fontSize: "2.5rem", marginBottom: 12 }}>🖥</div>
-                        <h2 style={{ fontFamily: "Orbitron, sans-serif", fontSize: "1.2rem", marginBottom: 10 }}>
-                          Fullscreen Required
-                        </h2>
-                        <p style={{ opacity: 0.75, marginBottom: 24, fontSize: "0.9rem", lineHeight: 1.5 }}>
-                          This interview must be taken in fullscreen mode. Exiting fullscreen will be recorded as a violation.
-                        </p>
-                        <button type="button" className="primary-btn" onClick={activateFullscreenAndStart} style={{ fontSize: "1rem", padding: "14px 28px" }}>
-                          Enable Fullscreen &amp; Start Interview
-                        </button>
-                        {cameraError && <p style={{ color: "#f0abfc", marginTop: 14, fontSize: "0.85rem" }}>{cameraError}</p>}
-                      </div>
-                    </div>
-                  )}
-                  <div className="camera-feed">
-                    {cameraReady ? (
-                      <video ref={videoRef} autoPlay muted playsInline />
-                    ) : (
-                      <div className="camera-placeholder">
-                        <div style={{ textAlign: "center" }}>
-                          <Icon name="camera" size={42} />
-                          <p className="panel-copy">Camera initialises after permission.</p>
+            <>
+              {/* ── PRE-FULLSCREEN VIEW: only camera + gate/pause overlay ── */}
+              {!isInterviewFullscreen && (
+                <section className="section">
+                  <div className="pre-fs-shell">
+                    {/* Minimal top bar */}
+                    <div className="pre-fs-topbar">
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <div className={`interview-timer ${isPaused ? "timer-paused" : ""}`}>
+                          <span className="timer-dot" />
+                          {isPaused ? "PAUSED" : formatTime(elapsedSeconds)}
                         </div>
+                        <span className="status-pill">
+                          <span className="signal-dot" />
+                          {isPaused ? "Interview paused — return to fullscreen" : fullscreenRequired ? "Waiting for fullscreen" : "Secure interview running"}
+                        </span>
                       </div>
-                    )}
+                      <button
+                        type="button"
+                        className="primary-btn"
+                        onClick={activateFullscreenAndStart}
+                        style={{ minWidth: 180 }}
+                      >
+                        <Icon name="expand" />
+                        {fullscreenRequired ? "Enable Fullscreen & Start" : isPaused ? "Return to Fullscreen" : "Fullscreen"}
+                      </button>
+                    </div>
+
+                    {/* Camera only — no question, no feedback */}
+                    <div className="pre-fs-camera" ref={cameraRef}>
+                      {cameraReady ? (
+                        <video ref={videoRef} autoPlay muted playsInline style={{ width: "100%", height: "100%", objectFit: "contain", background: "#050009" }} />
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 12, opacity: 0.6 }}>
+                          <Icon name="camera" size={48} />
+                          <p style={{ fontFamily: "Space Grotesk, sans-serif", fontSize: "0.9rem" }}>Camera initialising...</p>
+                        </div>
+                      )}
+
+                      {/* Gate overlay — before they click Enable Fullscreen */}
+                      {fullscreenRequired && (
+                        <div className="fullscreen-gate">
+                          <div className="fullscreen-gate-box">
+                            <div style={{ fontSize: "2.8rem", marginBottom: 14 }}>🖥</div>
+                            <h2 style={{ fontFamily: "Orbitron, sans-serif", fontSize: "1.2rem", marginBottom: 12 }}>
+                              Fullscreen Required
+                            </h2>
+                            <p style={{ opacity: 0.75, marginBottom: 28, fontSize: "0.9rem", lineHeight: 1.6, maxWidth: 380 }}>
+                              The interview runs in fullscreen mode only. Your question, camera, and answer panel will appear once you enable fullscreen. Exiting fullscreen during the interview counts as a violation and pauses the timer.
+                            </p>
+                            <button
+                              type="button"
+                              className="primary-btn"
+                              onClick={activateFullscreenAndStart}
+                              style={{ fontSize: "1rem", padding: "14px 32px" }}
+                            >
+                              <Icon name="expand" /> Enable Fullscreen &amp; Start Interview
+                            </button>
+                            {cameraError && <p style={{ color: "#f0abfc", marginTop: 14, fontSize: "0.85rem" }}>{cameraError}</p>}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Pause overlay — they exited fullscreen mid-interview */}
+                      {isPaused && !fullscreenRequired && (
+                        <div className="fullscreen-gate" style={{ background: "rgba(60,0,0,0.92)" }}>
+                          <div className="fullscreen-gate-box" style={{ borderColor: "rgba(248,113,113,0.3)" }}>
+                            <div style={{ fontSize: "2.8rem", marginBottom: 14 }}>⏸</div>
+                            <h2 style={{ fontFamily: "Orbitron, sans-serif", fontSize: "1.2rem", marginBottom: 12, color: "#f87171" }}>
+                              Interview Paused
+                            </h2>
+                            <p style={{ opacity: 0.8, marginBottom: 8, fontSize: "0.9rem", lineHeight: 1.6 }}>
+                              You exited fullscreen. Timer is paused.
+                            </p>
+                            <p style={{ color: "#f87171", marginBottom: 28, fontSize: "0.85rem" }}>
+                              Violation #{violations} recorded — {violationLog[violationLog.length - 1] ? `${violationLog[violationLog.length - 1].duration}s` : "timing..."}
+                            </p>
+                            <button
+                              type="button"
+                              className="primary-btn"
+                              onClick={activateFullscreenAndStart}
+                              style={{ fontSize: "1rem", padding: "14px 32px", background: "linear-gradient(135deg,#dc2626,#991b1b)" }}
+                            >
+                              <Icon name="expand" /> Return to Fullscreen
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <p style={{ textAlign: "center", fontFamily: "Space Grotesk, sans-serif", fontSize: "0.82rem", opacity: 0.45, marginTop: 10 }}>
+                      Questions and answer controls only appear inside fullscreen mode
+                    </p>
                   </div>
-                </div>
+                </section>
+              )}
 
-                {/* RIGHT — Feedback + answer controls */}
-                <div className="interview-feedback-card">
-                  <span className="if-label">Last answer feedback</span>
-
-                  {latestEvaluation ? (
-                    <>
-                      <div className={`if-verdict ${latestEvaluation.overall_score >= 7 ? "verdict-good" : latestEvaluation.overall_score >= 4 ? "verdict-mid" : "verdict-low"}`}>
-                        {latestEvaluation.overall_score >= 7 ? "✓ Strong" : latestEvaluation.overall_score >= 4 ? "~ Partial" : "✗ Weak"}
-                      </div>
-                      <p className="if-summary">{latestEvaluation.summary}</p>
-                    </>
-                  ) : (
-                    <div className="if-empty">
-                      Your feedback will appear here after you submit your first answer.
+              {/* ── FULLSCREEN VIEW: 3-column layout — only renders when fullscreen is active ── */}
+              {isInterviewFullscreen && (
+                <div className="fs-interview-root">
+                  {/* Violation flash popup */}
+                  {violationPopup && (
+                    <div className="violation-popup">
+                      ⚠ FULLSCREEN EXITED — Timer paused. Return to fullscreen to resume.
                     </div>
                   )}
 
-                  <div className="if-answer-area">
-                    <textarea
-                      className="answer-box"
-                      value={answerText}
-                      onChange={(event) => setAnswerText(event.target.value)}
-                      disabled={interviewComplete || isPaused}
-                      placeholder={isPaused ? "⏸ Interview paused — return to fullscreen to continue..." : interviewComplete ? "Interview complete" : "Type your answer here or use voice..."}
-                      style={{ minHeight: 90, opacity: isPaused ? 0.4 : 1 }}
-                    />
-                    {interimTranscript && (
-                      <p className="panel-copy listening-indicator">🎙 {interimTranscript}</p>
-                    )}
-                    <div className="voice-row">
-                      <button
-                        type="button"
-                        className={`ghost-btn ${isListening ? "listening-active" : ""}`}
-                        onClick={isListening ? stopVoiceInput : startVoiceInput}
-                        disabled={!speechSupported || interviewComplete || isPaused}
-                      >
-                        <Icon name="mic" /> {isListening ? "● Stop" : "Use Voice"}
-                      </button>
-                      <button
-                        type="button"
-                        className="skip-btn"
-                        onClick={skipQuestion}
-                        disabled={interviewComplete || !activeQuestion || isPaused}
-                      >
-                        Skip
-                      </button>
-                      {!speechSupported && <p className="panel-copy" style={{ fontSize: "0.78rem" }}>Voice not supported.</p>}
+                  {/* Top bar */}
+                  <div className="fs-topbar">
+                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                      <div className="interview-timer">
+                        <span className="timer-dot" />
+                        {formatTime(elapsedSeconds)}
+                      </div>
+                      <span className="status-pill"><span className="signal-dot" />Secure interview running</span>
+                      <span style={{ fontFamily: "Orbitron, sans-serif", fontSize: "0.75rem", opacity: 0.5 }}>
+                        {interviewComplete ? "Interview complete" : "Technical depth round"}
+                      </span>
                     </div>
-                    <button
-                      type="button"
-                      className="primary-btn"
-                      onClick={submitAnswer}
-                      disabled={isEvaluating || !activeQuestion || interviewComplete || isPaused}
-                      style={{ width: "100%", marginTop: 6 }}
-                    >
-                      {isPaused ? "⏸ Paused — Return to fullscreen" : isEvaluating ? "Evaluating..." : currentQuestionIndex === questionQueue.length - 1 ? "Submit Final Answer" : "Submit Answer"}
-                    </button>
+                    <div style={{ display: "flex", gap: 10 }}>
+                      <button
+                        type="button"
+                        className={`primary-btn ${interviewComplete ? "report-btn-ready" : ""}`}
+                        onClick={endInterview}
+                        disabled={isReporting || !interviewId}
+                      >
+                        {isReporting ? "Generating..." : interviewComplete ? "Generate Final Report" : "Generate Report"}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 3-column body */}
+                  <div className="fs-body">
+
+                    {/* LEFT — Question */}
+                    <div className="interview-question-card">
+                      <div className="iq-meta">
+                        <span className="iq-label">
+                          Q {Math.min(currentQuestionIndex + 1, questionQueue.length || 1)} / {questionQueue.length || 1}
+                        </span>
+                        <span className={`diff-badge diff-${activeDifficulty}`}>{difficultyLabels[activeDifficulty]}</span>
+                      </div>
+                      {interviewComplete ? (
+                        <p className="iq-text" style={{ color: "#4ade80" }}>
+                          Interview complete. {answeredCount} answered — generate your report.
+                        </p>
+                      ) : (
+                        <p className="iq-text">
+                          {activeQuestion || "No question — go back and generate questions first."}
+                        </p>
+                      )}
+                      <div className="iq-controls">
+                        {cameraError && <p style={{ color: "#f0abfc", fontSize: "0.82rem" }}>{cameraError}</p>}
+                        {workflowError && <p style={{ color: "#f0abfc", fontSize: "0.82rem" }}>{workflowError}</p>}
+                        <p style={{ fontSize: "0.75rem", opacity: 0.4 }}>Violations: {violations}</p>
+                      </div>
+                    </div>
+
+                    {/* CENTRE — Camera */}
+                    <div className="fs-camera-col">
+                      <div ref={cameraRef} className="fs-camera">
+                        {cameraReady ? (
+                          <video ref={videoRef} autoPlay muted playsInline style={{ width: "100%", height: "100%", objectFit: "contain", background: "#050009" }} />
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", opacity: 0.5 }}>
+                            <Icon name="camera" size={48} />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* RIGHT — Feedback + Answer */}
+                    <div className="interview-feedback-card">
+                      <span className="if-label">Last answer feedback</span>
+                      {latestEvaluation ? (
+                        <>
+                          <div className={`if-verdict ${latestEvaluation.overall_score >= 7 ? "verdict-good" : latestEvaluation.overall_score >= 4 ? "verdict-mid" : "verdict-low"}`}>
+                            {latestEvaluation.overall_score >= 7 ? "✓ Strong" : latestEvaluation.overall_score >= 4 ? "~ Partial" : "✗ Weak"}
+                          </div>
+                          <p className="if-summary">{latestEvaluation.summary}</p>
+                        </>
+                      ) : (
+                        <div className="if-empty">Feedback appears here after your first answer.</div>
+                      )}
+
+                      <div className="if-answer-area">
+                        <textarea
+                          className="answer-box"
+                          value={answerText}
+                          onChange={(e) => setAnswerText(e.target.value)}
+                          disabled={interviewComplete}
+                          placeholder={interviewComplete ? "Interview complete" : "Type your answer or use voice..."}
+                          style={{ minHeight: 100 }}
+                        />
+                        {interimTranscript && (
+                          <p className="panel-copy listening-indicator">🎙 {interimTranscript}</p>
+                        )}
+                        <div className="voice-row">
+                          <button
+                            type="button"
+                            className={`ghost-btn ${isListening ? "listening-active" : ""}`}
+                            onClick={isListening ? stopVoiceInput : startVoiceInput}
+                            disabled={!speechSupported || interviewComplete}
+                          >
+                            <Icon name="mic" /> {isListening ? "● Stop" : "Use Voice"}
+                          </button>
+                          <button
+                            type="button"
+                            className="skip-btn"
+                            onClick={skipQuestion}
+                            disabled={interviewComplete || !activeQuestion}
+                          >
+                            Skip
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          className="primary-btn"
+                          onClick={submitAnswer}
+                          disabled={isEvaluating || !activeQuestion || interviewComplete}
+                          style={{ width: "100%", marginTop: 6 }}
+                        >
+                          {isEvaluating ? "Evaluating..." : currentQuestionIndex === questionQueue.length - 1 ? "Submit Final Answer" : "Submit Answer"}
+                        </button>
+                      </div>
+                    </div>
+
                   </div>
                 </div>
-
-              </div>
-            </section>
+              )}
+            </>
           )}
 
           {view === "reports" && (
