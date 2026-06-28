@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.analysis import router as analysis_router
 from api.interview import router as interview_router
 from api.upload import router as upload_router
+from api.voice import router as voice_router
+from api.reports import router as reports_router
 from database.mongo import users_collection
 from google.oauth2 import id_token
 from google.auth.transport import requests
@@ -42,6 +44,8 @@ app.add_middleware(
 app.include_router(upload_router)
 app.include_router(interview_router)
 app.include_router(analysis_router)
+app.include_router(voice_router)
+app.include_router(reports_router)
 
 
 @app.get("/")

@@ -1441,6 +1441,11 @@ export default function FeaturesPage() {
   const [generatedReport, setGeneratedReport] = useState(null);
   const [interviewComplete, setInterviewComplete] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [pastReports, setPastReports] = useState([]);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [expandedReport, setExpandedReport] = useState(null);
+  const [transcriptMetrics, setTranscriptMetrics] = useState({});
   const [questionStartedAt, setQuestionStartedAt] = useState(Date.now());
   const [workflowMessage, setWorkflowMessage] = useState("");
   const [workflowError, setWorkflowError] = useState("");
@@ -1467,6 +1472,8 @@ export default function FeaturesPage() {
   const streamRef = useRef(null);
   const recognitionRef = useRef(null);
   const timerRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
 
   const currentUser = useMemo(() => {
     try {
@@ -1595,6 +1602,12 @@ export default function FeaturesPage() {
   useEffect(() => {
     setQuestionStartedAt(Date.now());
   }, [activeQuestion]);
+
+  // Fetch past reports whenever the reports tab is opened
+  useEffect(() => {
+    if (view === "reports") fetchPastReports();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
 
   useEffect(() => {
     return () => {
@@ -1742,73 +1755,96 @@ export default function FeaturesPage() {
     }
   };
 
-  const startVoiceInput = () => {
-    if (!speechSupported || isListening) return;
-
-    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognition = new Recognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
-    recognition.lang = "en-IN"; // better for Indian English accents
-
-    recognition.onresult = (event) => {
-      let finalText = "";
-      let interimText = "";
-
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const transcript = event.results[index][0].transcript;
-        if (event.results[index].isFinal) {
-          finalText += transcript;
-        } else {
-          interimText += transcript;
-        }
-      }
-
-      if (finalText.trim()) {
-        setAnswerText((current) => `${current}${current ? " " : ""}${finalText.trim()}`);
-      }
-      setInterimTranscript(interimText.trim());
-    };
-
-    recognition.onerror = (event) => {
-      // no-speech is normal during pauses — don't stop, just ignore
-      if (event.error === "no-speech") return;
-      // network errors: try to restart
-      if (event.error === "network") {
-        try { recognition.stop(); } catch {}
-        setTimeout(() => { if (isListening) recognition.start(); }, 300);
-        return;
-      }
-      // aborted means we stopped it ourselves — don't show error
-      if (event.error === "aborted") return;
-      setWorkflowError(`Voice error: ${event.error}. Try clicking Use Voice again.`);
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      // Auto-restart as long as isListening is still true (user hasn't clicked Stop)
-      // Use a ref so the closure captures the latest value
-      if (recognitionRef._shouldRestart) {
-        try { recognition.start(); } catch {}
-      } else {
-        setIsListening(false);
-        setInterimTranscript("");
-      }
-    };
-
-    recognitionRef.current = recognition;
-    recognitionRef._shouldRestart = true;
-    recognition.start();
+  const startVoiceInput = async () => {
+    if (isRecording) return;
     setWorkflowError("");
-    setIsListening(true);
+    setInterimTranscript("🎙 Recording... speak your answer clearly");
+
+    try {
+      // Get a fresh audio-only stream for recording (separate from camera stream)
+      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+          ? "audio/webm"
+          : "audio/ogg";
+
+      const recorder = new MediaRecorder(audioStream, { mimeType });
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        // Stop the audio tracks
+        audioStream.getTracks().forEach((t) => t.stop());
+
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        if (blob.size < 1000) {
+          setInterimTranscript("");
+          setWorkflowError("Recording too short — please speak for at least 2 seconds.");
+          return;
+        }
+
+        setInterimTranscript("⏳ Transcribing with Whisper AI...");
+
+        try {
+          const formData = new FormData();
+          formData.append("audio", blob, `recording.${mimeType.includes("ogg") ? "ogg" : "webm"}`);
+          formData.append("language", "en");
+
+          const res = await fetch(`${API_URL}/voice/transcribe`, {
+            method: "POST",
+            body: formData,
+          });
+
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || "Transcription failed");
+
+          const text = data.transcript?.trim() || "";
+          if (text) {
+            setAnswerText((prev) => `${prev}${prev ? " " : ""}${text}`);
+          }
+
+          // Store speech metrics for evaluation (nested under data.metrics)
+          const m = data.metrics || {};
+          setTranscriptMetrics({
+            word_count: m.word_count,
+            duration_seconds: m.duration_seconds,
+            speaking_rate_wpm: m.speaking_rate_wpm,
+            filler_count: m.filler_word_count,
+            pause_count: m.pause_count,
+            pauses: m.pauses || [],
+          });
+
+          setInterimTranscript(text ? `✓ Transcribed: "${text.slice(0, 60)}${text.length > 60 ? "..." : ""}"` : "No speech detected — try again.");
+          setTimeout(() => setInterimTranscript(""), 3000);
+        } catch (err) {
+          setWorkflowError(`Transcription failed: ${err.message}`);
+          setInterimTranscript("");
+        }
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start(250); // collect chunks every 250ms
+      setIsRecording(true);
+      setIsListening(true);
+    } catch (err) {
+      setWorkflowError(`Microphone error: ${err.message}`);
+    }
   };
 
   const stopVoiceInput = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    // Also stop legacy recognition if somehow running
     recognitionRef._shouldRestart = false;
     recognitionRef.current?.stop?.();
+    setIsRecording(false);
     setIsListening(false);
-    setInterimTranscript("");
   };
 
   const submitAnswer = async () => {
@@ -1830,8 +1866,8 @@ export default function FeaturesPage() {
           user_email: currentUser.email || null,
           question: activeQuestion,
           answer: answerText,
-          duration_seconds: Math.max(20, Math.round((Date.now() - questionStartedAt) / 1000)),
-          pauses: [],
+          duration_seconds: transcriptMetrics.duration_seconds || Math.max(20, Math.round((Date.now() - questionStartedAt) / 1000)),
+          pauses: transcriptMetrics.pauses || [],
           visual_metrics: {
             eye_contact_percentage: cameraReady ? 70 : 0,
             face_visibility_percentage: cameraReady ? 85 : 0,
@@ -1850,6 +1886,7 @@ export default function FeaturesPage() {
       setLatestEvaluation(data.evaluation);
       setEvaluations((items) => [...items, data]);
       setAnswerText("");
+      setTranscriptMetrics({});
 
       if (currentQuestionIndex < questionQueue.length - 1) {
         setCurrentQuestionIndex((index) => index + 1);
@@ -1965,6 +2002,60 @@ export default function FeaturesPage() {
     const link = document.createElement("a");
     link.href = url;
     link.download = "twintalk-interview-report.txt";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const fetchPastReports = async () => {
+    if (!currentUser.email) return;
+    setReportsLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/reports/?user_email=${encodeURIComponent(currentUser.email)}`);
+      const data = await res.json();
+      if (res.ok) setPastReports(data.reports || []);
+    } catch {
+      // silently fail — user sees empty state
+    } finally {
+      setReportsLoading(false);
+    }
+  };
+
+  const downloadPastReportAsPdf = (reportItem) => {
+    const r = reportItem.report || {};
+    const lines = [
+      "TwinTalk AI — Interview Report",
+      `Date: ${new Date(reportItem.created_at).toLocaleString()}`,
+      `Source: ${reportItem.source_name}`,
+      `Questions answered: ${reportItem.questions_answered}`,
+      `Questions skipped: ${reportItem.questions_skipped}`,
+      `Rule violations: ${reportItem.violations}`,
+      `Time outside fullscreen: ${reportItem.total_outside_fullscreen_seconds}s`,
+      "",
+      "Summary",
+      r.summary || "N/A",
+      "",
+      "Scores",
+      `Overall: ${r.overall_score ?? "N/A"}/10`,
+      `Confidence: ${r.confidence_score ?? "N/A"}/10`,
+      `Technical accuracy: ${r.technical_accuracy ?? "N/A"}/10`,
+      `Communication: ${r.communication ?? "N/A"}/10`,
+      `Hesitation: ${r.hesitation || "N/A"}`,
+      `Eye contact: ${r.eye_contact || "N/A"}`,
+      "",
+      "Strengths",
+      ...((r.strengths || []).map((s) => `- ${s}`)),
+      "",
+      "Weaknesses",
+      ...((r.weaknesses || []).map((w) => `- ${w}`)),
+      "",
+      "Improvement Plan",
+      ...((r.improvement_plan || []).map((p) => `- ${p}`)),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `twintalk-report-${reportItem.report_id.slice(-6)}.txt`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -2424,24 +2515,140 @@ export default function FeaturesPage() {
             <section className="section">
               <div className="section-head">
                 <div>
-                  <span className="eyebrow"><span className="signal-dot" />Reports</span>
+                  <span className="eyebrow"><span className="signal-dot" />My Reports</span>
                   <h1 className="section-title">Every interview becomes a report</h1>
-                  <p className="section-copy">
-                    Each report stores the topic title, interview time, duration, and assessment scales for fluency,
-                    knowledge, confidence, clarity, depth, and more.
-                  </p>
+                  <p className="section-copy">All your past interviews are stored here. Click any card to expand the full report.</p>
                 </div>
+                <button type="button" className="ghost-btn" onClick={fetchPastReports} disabled={reportsLoading}>
+                  {reportsLoading ? "Loading..." : "↻ Refresh"}
+                </button>
               </div>
 
-              <div className="reports-grid">
-                {reports.map((report) => (
-                  <article className="report-card" key={report.title}>
-                    <div className="report-icon"><Icon name="report" /></div>
-                    <h2 className="report-title">{report.title}</h2>
-                    <p className="report-meta">{report.time} · {report.duration} · {report.difficulty}</p>
-                    <ScoreLines scores={report.scores} />
-                  </article>
-                ))}
+              {reportsLoading && (
+                <p className="status-text" style={{ textAlign: "center", marginTop: 32 }}>Loading your reports...</p>
+              )}
+
+              {!reportsLoading && pastReports.length === 0 && (
+                <div style={{ textAlign: "center", padding: "60px 20px", opacity: 0.5 }}>
+                  <p style={{ fontFamily: "Orbitron, sans-serif", fontSize: "1rem" }}>No reports yet</p>
+                  <p style={{ fontFamily: "Space Grotesk, sans-serif", fontSize: "0.9rem", marginTop: 8 }}>
+                    Complete an interview and generate a report — it will appear here.
+                  </p>
+                </div>
+              )}
+
+              <div className="reports-grid" style={{ gridTemplateColumns: "1fr" }}>
+                {pastReports.map((item) => {
+                  const r = item.report || {};
+                  const isExpanded = expandedReport === item.report_id;
+
+                  // Map real backend fields to display scores (0-10 → 0-100)
+                  const scores = {
+                    Knowledge: Math.round((r.technical_accuracy ?? 0) * 10),
+                    Confidence: Math.round((r.confidence_score ?? 0) * 10),
+                    Clarity: Math.round((r.communication ?? 0) * 10),
+                    Fluency: r.hesitation === "High" ? 40 : r.hesitation === "Medium" ? 65 : r.hesitation === "Low" ? 88 : 0,
+                    Overall: Math.round((r.overall_score ?? 0) * 10),
+                  };
+
+                  return (
+                    <article className="report-card" key={item.report_id} style={{ padding: 0, overflow: "hidden" }}>
+                      {/* Collapsed header — always visible */}
+                      <div
+                        style={{ padding: "20px 24px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}
+                        onClick={() => setExpandedReport(isExpanded ? null : item.report_id)}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 16, flex: 1, minWidth: 0 }}>
+                          <div className="report-icon" style={{ flexShrink: 0 }}><Icon name="report" /></div>
+                          <div style={{ minWidth: 0 }}>
+                            <h2 className="report-title" style={{ marginTop: 0, fontSize: "1rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {item.source_name}
+                            </h2>
+                            <p className="report-meta" style={{ marginTop: 4 }}>
+                              {new Date(item.created_at).toLocaleString()} · {item.questions_answered} answered · {item.questions_skipped} skipped · {item.violations} violations
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Score pills */}
+                        <div style={{ display: "flex", gap: 10, alignItems: "center", flexShrink: 0 }}>
+                          {Object.entries(scores).map(([label, val]) => (
+                            <div key={label} style={{ textAlign: "center", minWidth: 52 }}>
+                              <div style={{ fontFamily: "Orbitron, sans-serif", fontSize: "1rem", color: val >= 70 ? "#4ade80" : val >= 50 ? "#fbbf24" : "#f87171" }}>{val || "—"}</div>
+                              <div style={{ fontFamily: "Space Grotesk, sans-serif", fontSize: "0.68rem", opacity: 0.6 }}>{label}</div>
+                            </div>
+                          ))}
+                          <div style={{ marginLeft: 8, opacity: 0.5, fontSize: "1.2rem" }}>{isExpanded ? "▲" : "▼"}</div>
+                        </div>
+                      </div>
+
+                      {/* Expanded full report */}
+                      {isExpanded && (
+                        <div style={{ borderTop: "1px solid rgba(218,176,255,0.12)", padding: "24px" }}>
+                          {/* Score bars */}
+                          <div style={{ marginBottom: 20 }}>
+                            <ScoreLines scores={scores} />
+                          </div>
+
+                          {/* Overview */}
+                          <div className="report-section">
+                            <h2>Overview</h2>
+                            <p>{r.summary || "No summary available."}</p>
+                          </div>
+
+                          {/* Session details */}
+                          <div className="report-section">
+                            <h2>Session Details</h2>
+                            <div className="report-kv">
+                              <div><span>Source</span><strong>{item.source_name}</strong></div>
+                              <div><span>Date</span><strong>{new Date(item.created_at).toLocaleString()}</strong></div>
+                              <div><span>Answered</span><strong>{item.questions_answered}</strong></div>
+                              <div><span>Skipped</span><strong>{item.questions_skipped}</strong></div>
+                              <div><span>Violations</span><strong>{item.violations}</strong></div>
+                              <div><span>Outside fullscreen</span><strong>{item.total_outside_fullscreen_seconds}s</strong></div>
+                              <div><span>Hesitation</span><strong>{r.hesitation || "N/A"}</strong></div>
+                              <div><span>Eye contact</span><strong>{r.eye_contact || "N/A"}</strong></div>
+                            </div>
+                          </div>
+
+                          {/* Strengths */}
+                          {r.strengths?.length > 0 && (
+                            <div className="report-section">
+                              <h2>Strengths</h2>
+                              <ul>{r.strengths.map((s, i) => <li key={i}>{s}</li>)}</ul>
+                            </div>
+                          )}
+
+                          {/* Weaknesses */}
+                          {r.weaknesses?.length > 0 && (
+                            <div className="report-section">
+                              <h2>Weaknesses</h2>
+                              <ul>{r.weaknesses.map((w, i) => <li key={i}>{w}</li>)}</ul>
+                            </div>
+                          )}
+
+                          {/* Improvement plan */}
+                          {r.improvement_plan?.length > 0 && (
+                            <div className="report-section">
+                              <h2>Improvement Plan</h2>
+                              <ol>{r.improvement_plan.map((p, i) => <li key={i}>{p}</li>)}</ol>
+                            </div>
+                          )}
+
+                          {/* Download */}
+                          <button
+                            type="button"
+                            className="primary-btn"
+                            onClick={() => downloadPastReportAsPdf(item)}
+                            style={{ marginTop: 16 }}
+                          >
+                            <Icon name="report" /> Download Report
+                          </button>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
               </div>
             </section>
           )}
