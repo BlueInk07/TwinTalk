@@ -1755,96 +1755,127 @@ export default function FeaturesPage() {
     }
   };
 
-  const startVoiceInput = async () => {
-    if (isRecording) return;
+  const startVoiceInput = () => {
+    if (isListening) return;
     setWorkflowError("");
-    setInterimTranscript("🎙 Recording... speak your answer clearly");
 
-    try {
-      // Get a fresh audio-only stream for recording (separate from camera stream)
-      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : MediaRecorder.isTypeSupported("audio/webm")
-          ? "audio/webm"
-          : "audio/ogg";
-
-      const recorder = new MediaRecorder(audioStream, { mimeType });
-      audioChunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        // Stop the audio tracks
-        audioStream.getTracks().forEach((t) => t.stop());
-
-        const blob = new Blob(audioChunksRef.current, { type: mimeType });
-        if (blob.size < 1000) {
-          setInterimTranscript("");
-          setWorkflowError("Recording too short — please speak for at least 2 seconds.");
-          return;
-        }
-
-        setInterimTranscript("⏳ Transcribing with Whisper AI...");
-
-        try {
-          const formData = new FormData();
-          formData.append("audio", blob, `recording.${mimeType.includes("ogg") ? "ogg" : "webm"}`);
-          formData.append("language", "en");
-
-          const res = await fetch(`${API_URL}/voice/transcribe`, {
-            method: "POST",
-            body: formData,
-          });
-
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.detail || "Transcription failed");
-
-          const text = data.transcript?.trim() || "";
-          if (text) {
-            setAnswerText((prev) => `${prev}${prev ? " " : ""}${text}`);
-          }
-
-          // Store speech metrics for evaluation (nested under data.metrics)
-          const m = data.metrics || {};
-          setTranscriptMetrics({
-            word_count: m.word_count,
-            duration_seconds: m.duration_seconds,
-            speaking_rate_wpm: m.speaking_rate_wpm,
-            filler_count: m.filler_word_count,
-            pause_count: m.pause_count,
-            pauses: m.pauses || [],
-          });
-
-          setInterimTranscript(text ? `✓ Transcribed: "${text.slice(0, 60)}${text.length > 60 ? "..." : ""}"` : "No speech detected — try again.");
-          setTimeout(() => setInterimTranscript(""), 3000);
-        } catch (err) {
-          setWorkflowError(`Transcription failed: ${err.message}`);
-          setInterimTranscript("");
-        }
-      };
-
-      mediaRecorderRef.current = recorder;
-      recorder.start(250); // collect chunks every 250ms
-      setIsRecording(true);
-      setIsListening(true);
-    } catch (err) {
-      setWorkflowError(`Microphone error: ${err.message}`);
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setWorkflowError("Voice input is not supported in this browser. Please use Chrome.");
+      return;
     }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-IN";           // better for Indian English accents
+    recognition.continuous = true;         // keep listening until explicitly stopped
+    recognition.interimResults = true;     // show partial results as they come
+    recognition.maxAlternatives = 1;
+
+    let finalTranscript = "";
+    let interimBuffer = "";
+    let silenceTimer = null;
+    let wordCount = 0;
+    const startTime = Date.now();
+
+    // Reset silence timer — auto-stops after 4s of silence
+    const resetSilenceTimer = () => {
+      clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(() => {
+        recognition.stop();
+      }, 4000);
+    };
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setInterimTranscript("🎙 Listening... speak your answer");
+      resetSilenceTimer();
+    };
+
+    recognition.onresult = (event) => {
+      resetSilenceTimer(); // user spoke — reset the silence countdown
+      interimBuffer = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        const text = result[0].transcript;
+
+        if (result.isFinal) {
+          finalTranscript += (finalTranscript ? " " : "") + text.trim();
+          wordCount += text.trim().split(/\s+/).length;
+          // Update the answer box immediately so user sees their words building up
+          setAnswerText((prev) => {
+            const base = prev.trim();
+            return base ? `${base} ${text.trim()}` : text.trim();
+          });
+        } else {
+          interimBuffer = text;
+        }
+      }
+
+      // Show interim (in-progress) words as a live preview
+      setInterimTranscript(interimBuffer ? `🎙 ${interimBuffer}` : "🎙 Listening...");
+    };
+
+    recognition.onerror = (event) => {
+      // no-speech is normal during thinking pauses — don't treat as error
+      if (event.error === "no-speech") {
+        resetSilenceTimer();
+        return;
+      }
+      // network errors — try restarting once
+      if (event.error === "network") {
+        setTimeout(() => {
+          if (recognitionRef._shouldRestart) recognition.start();
+        }, 400);
+        return;
+      }
+      // aborted = user stopped deliberately, not an error
+      if (event.error === "aborted") return;
+
+      setWorkflowError(`Voice error: ${event.error}. Try again.`);
+      setIsListening(false);
+      setInterimTranscript("");
+    };
+
+    recognition.onend = () => {
+      clearTimeout(silenceTimer);
+      setInterimTranscript("");
+
+      if (recognitionRef._shouldRestart) {
+        // Auto-restart — keeps listening continuously even if browser stops it
+        try { recognition.start(); } catch { /* already started */ }
+        return;
+      }
+
+      // Session ended — build transcript metrics from what we collected
+      const durationSeconds = Math.round((Date.now() - startTime) / 1000);
+      setTranscriptMetrics({
+        word_count: wordCount,
+        duration_seconds: durationSeconds,
+        speaking_rate_wpm: durationSeconds > 0 ? Math.round((wordCount / durationSeconds) * 60) : 0,
+        filler_count: (finalTranscript.match(/\b(uh|um|er|ah|like|basically|you know)\b/gi) || []).length,
+        pause_count: 0,
+        pauses: [],
+      });
+
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    recognitionRef._shouldRestart = true;
+    recognition.start();
   };
 
   const stopVoiceInput = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-    }
-    // Also stop legacy recognition if somehow running
     recognitionRef._shouldRestart = false;
-    recognitionRef.current?.stop?.();
+    try { recognitionRef.current?.stop(); } catch { /* already stopped */ }
+    // Also stop any leftover MediaRecorder if somehow running
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try { mediaRecorderRef.current.stop(); } catch { /* ignore */ }
+    }
     setIsRecording(false);
     setIsListening(false);
+    setInterimTranscript("");
   };
 
   const submitAnswer = async () => {
